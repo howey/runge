@@ -52,4 +52,5 @@ int main() {
 		printf("theta: %f\tt: %f\n", theta, t + TIMESTEP);
 		fprintf(output, "theta: %f\tt: %f\n", theta, t + TIMESTEP);
 	}
+	fclose(output);
 }	
