@@ -21,7 +21,8 @@ float thetaDot(float theta, float phi) {
 	return -GAMMA * (cosf(phi) * HY - sinf(phi) * HX)\
 	+ ALPHA * (cosf(theta) * cosf(phi) * HX - HZ * sinf(theta) + cosf(theta) * sinf(phi) * HY);
 }
-	
+
+//TODO: Memoize k1, k2, k3 and k4 to increase performance
 float k1theta(float theta) {
 	return thetaDot(theta, 0);
 }
