@@ -6,12 +6,12 @@
 
 static FILE * output;
 
-static const float ALPHA = 1;
-static const float GAMMA = 1;
+static const float ALPHA = 35186;
+static const float GAMMA = 1.76e7;
 static const float HX = 0;
 static const float HY = 0;
-static const float HZ = -10;
-static const float M = 1;
+static const float HZ = -10e3;
+static const float M = 1000;
 static const float TIMESTEP = .005;
 
 float phiDot(float theta, float phi) {
@@ -70,7 +70,7 @@ int main(int argc, char *argv[]) {
 	}
 	else 
 		endTime = strtof(argv[1], NULL);
-	float theta = 1;
+	float theta = 1 * 57.3; //57.3 degrees in a radian
 	float phi = 0;
 	fprintf(output, "theta: %f\tt: %f\n", theta, t);
 	for(t = 0; t < endTime; t += TIMESTEP) {
