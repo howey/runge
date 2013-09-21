@@ -12,7 +12,7 @@ static const float HX = 0;
 static const float HY = 0;
 static const float HZ = -10e3;
 static const float M = 1000;
-static const float TIMESTEP = .005;
+static const float TIMESTEP = .000000005;
 
 float phiDot(float theta, float phi) {
 	return GAMMA * ((cosf(theta) * sinf(phi) * HY) / sinf(theta) + (cosf(theta) * cosf(phi) * HX) / sinf(theta) - HZ) + ALPHA * ((cosf(phi) * HY) / sinf(theta) - (sinf(phi) * HX) / sin(theta));	
@@ -70,7 +70,7 @@ int main(int argc, char *argv[]) {
 	}
 	else 
 		endTime = strtof(argv[1], NULL);
-	float theta = 1 * 57.3; //57.3 degrees in a radian
+	float theta = 1/57.3; //57.3 degrees in a radian
 	float phi = 0;
 	fprintf(output, "theta: %f\tt: %f\n", theta, t);
 	for(t = 0; t < endTime; t += TIMESTEP) {
