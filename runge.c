@@ -75,14 +75,14 @@ int main(int argc, char *argv[]) {
 	fprintf(output, "theta: %f\tt: %f\n", theta, t);
 	for(t = 0; t < endTime; t += TIMESTEP) {
 		theta = theta + (1.0/6.0) * (k1theta(theta) + 2.0 * k2theta(theta) + 2.0 * k3theta(theta) + k4theta(theta)) * TIMESTEP;
-		printf("theta: %f\tt: %f\n", theta, t + TIMESTEP);
-		fprintf(output, "theta: %f\tt: %f\n", theta, t + TIMESTEP);
+		//printf("theta: %f\tt: %f\n", theta, t + TIMESTEP);
+		//fprintf(output, "theta: %f\tt: %f\n", theta, t + TIMESTEP);
 	}
 	fprintf(output, "phi: %f\tt: %f\n", phi, t);
 	for(t = 0; t < endTime; t += TIMESTEP) {
 		phi = phi + (1.0/6.0) * (k1phi(phi) + 2.0 * k2phi(phi) + 2.0 * k3phi(phi) + k4phi(phi)) * TIMESTEP;
-		printf("phi: %f\tt: %f\n", phi, t + TIMESTEP);
-		fprintf(output, "phi: %f\tt: %f\n", phi, t + TIMESTEP);
+		//printf("phi: %f\tt: %f\n", phi, t + TIMESTEP);
+		//fprintf(output, "phi: %f\tt: %f\n", phi, t + TIMESTEP);
 	}
 	printf("M(%f) = %fx + %fy + %fz\n", endTime, M * sinf(theta) * cosf(phi), M * sinf(theta) * sinf(phi), M * cosf(theta));
 	fprintf(output, "M(%f) = %fx + %fy + %fz\n", endTime, M * sinf(theta) * cosf(phi), M * sinf(theta) * sinf(phi), M * cosf(theta));
