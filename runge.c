@@ -1,17 +1,15 @@
 //Runge-Kutta 4th Order solver
-//Compile with gcc -lm runge.c
+//Compile with gcc -lm -std=c99 runge.c
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <stdbool.h>
 
 static FILE * output;
 
 static const float ALPHA = 35186; //alpha*gamma / (1 + alpha^2)
 static const float GAMMA = 1.76e7;
-//static const float HX = 0;
-//static const float HY = 0;
-//static const float HZ = -10e3;
-static const float M = 1000;
+//static const float M = 1000;
 static const float TIMESTEP = .000000005;
 static const float K = 1e6;
 
@@ -21,11 +19,17 @@ typedef struct {
 	float z;
 } Vector;
 
+typedef struct {
+	float r;
+	float theta;
+	float phi;
+} SphVector;
+
 //Computes the anisotropy field and writes the result to a Vector H
-float anisotropyH(const float theta, const float phi, Vector * H) {
-	H->x = (1/M) * -2 * K * cosf(theta) * sinf(theta) * cosf(phi) * cosf(theta);
-	H->y = (1/M) * -2 * K * cosf(theta) * sinf(theta) * sinf(phi) * cosf(theta);
-	H->z = (1/M) * 2 * K * cosf(theta) * powf(sinf(theta), 2);
+float anisotropyH(const float theta, const float phi, Vector * H, const SphVector * M) {
+	H->x = (1/M->r) * -2 * K * cosf(theta) * sinf(theta) * cosf(phi) * cosf(theta);
+	H->y = (1/M->r) * -2 * K * cosf(theta) * sinf(theta) * sinf(phi) * cosf(theta);
+	H->z = (1/M->r) * 2 * K * cosf(theta) * powf(sinf(theta), 2);
 }
 
 float phiDot(const float theta, const float phi, const Vector * H) {
@@ -70,11 +74,21 @@ float k4phi(const float phi, const Vector * H) {
 	return phiDot(1, phi + k3phi(phi, H) * TIMESTEP, H);
 }
 
+void simulate(const Vector * H, SphVector * M, const float endTime) {
+	for(float t = 0; t < endTime; t += TIMESTEP) {
+		M->theta = M->theta + (1.0/6.0) * (k1theta(M->theta, H) + 2.0 * k2theta(M->theta, H) + 2.0 * k3theta(M->theta, H) + k4theta(M->theta, H)) * TIMESTEP;
+	}
+	
+	for(float t = 0; t < endTime; t += TIMESTEP) {
+		M->phi = M->phi + (1.0/6.0) * (k1phi(M->phi, H) + 2.0 * k2phi(M->phi, H) + 2.0 * k3phi(M->phi, H) + k4phi(M->phi, H)) * TIMESTEP;
+	}
+}
+
 int main(int argc, char *argv[]) {
-	float theta = 1/57.3; //57.3 degrees in a radian
-	float phi = 0;
-	float t = 0;
+	//float theta = 1/57.3; //57.3 degrees in a radian
+	//float phi = 0;
 	float endTime;
+	float time;
 
 	//The applied field, H
 	Vector * applH = malloc(sizeof(Vector));
@@ -82,6 +96,12 @@ int main(int argc, char *argv[]) {
 	applH->y = 0.0f;
 	applH->z = -10e3;
 
+	//The magnetization, M
+	SphVector * M = malloc(sizeof(SphVector));
+	M->r = 1000;
+	M->theta = (1/57.3f); //Initial angle of 1 degree, 57.3 degrees in a radian
+	M->phi = 0;
+	
 	output = fopen("output.txt", "w");
 	if(output == NULL) {
 		printf("error opening file\n");
@@ -89,32 +109,27 @@ int main(int argc, char *argv[]) {
 	}
 
 	if(argc < 2){
-		printf("Usage: %s [t]\n", argv[0]);
+		//Get time step in calculating hysterisis loop
+		printf("Usage: %s [timestep]\n", argv[0]);
 		return 0;
 	}
 	else 
 		endTime = strtof(argv[1], NULL);
 	
-	fprintf(output, "theta: %f\tt: %f\n", theta, t);
-	
-	for(t = 0; t < endTime; t += TIMESTEP) {
-		theta = theta + (1.0/6.0) * (k1theta(theta, applH) + 2.0 * k2theta(theta, applH) + 2.0 * k3theta(theta, applH) + k4theta(theta, applH)) * TIMESTEP;
-		//printf("theta: %f\tt: %f\n", theta, t + TIMESTEP);
-		//fprintf(output, "theta: %f\tt: %f\n", theta, t + TIMESTEP);
-	}
-	
-	fprintf(output, "phi: %f\tt: %f\n", phi, t);
-	
-	for(t = 0; t < endTime; t += TIMESTEP) {
-		phi = phi + (1.0/6.0) * (k1phi(phi, applH) + 2.0 * k2phi(phi, applH) + 2.0 * k3phi(phi, applH) + k4phi(phi, applH)) * TIMESTEP;
-		//printf("phi: %f\tt: %f\n", phi, t + TIMESTEP);
-		//fprintf(output, "phi: %f\tt: %f\n", phi, t + TIMESTEP);
-	}
-	
-	printf("M(%f) = %fx + %fy + %fz\n", endTime, M * sinf(theta) * cosf(phi), M * sinf(theta) * sinf(phi), M * cosf(theta));
-	fprintf(output, "M(%f) = %fx + %fy + %fz\n", endTime, M * sinf(theta) * cosf(phi), M * sinf(theta) * sinf(phi), M * cosf(theta));
+	bool isDecreasing = true;
+	do {
+		time += endTime;
+		simulate(applH, M, endTime);
+		if(applH->z + 2500.0f < 1.0f)
+			isDecreasing = false;
+		isDecreasing ? (applH->z -= 50.0f) : (applH->z += 50.0f);
+		fprintf(output, "M(%e) = %fx + %fy + %fz\n", time, M->r * sinf(M->theta) * cosf(M->phi), M->r * sinf(M->theta) * sinf(M->phi), M->r * cosf(M->theta));
+	} while(applH->z - 2500.0f < 1.0f);
+
+	printf("M(%e) = %fx + %fy + %fz\n", endTime, M->r * sinf(M->theta) * cosf(M->phi), M->r * sinf(M->theta) * sinf(M->phi), M->r * cosf(M->theta));
 	
 	fclose(output);
 	free(applH);
+	free(M);
 	return 0;
 }	
