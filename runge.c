@@ -10,7 +10,7 @@ static FILE * output;
 static const float ALPHA = 35186; //alpha*gamma / (1 + alpha^2)
 static const float GAMMA = 1.76e7;
 //static const float M = 1000;
-static const float TIMESTEP = .000000005;
+static const float TIMESTEP = .0000000005;
 static const float K = 1e6;
 
 typedef struct {
@@ -26,10 +26,17 @@ typedef struct {
 } SphVector;
 
 //Computes the anisotropy field and writes the result to a Vector H
-float anisotropyH(const float theta, const float phi, Vector * H, const SphVector * M) {
-	H->x = (1/M->r) * -2 * K * cosf(theta) * sinf(theta) * cosf(phi) * cosf(theta);
-	H->y = (1/M->r) * -2 * K * cosf(theta) * sinf(theta) * sinf(phi) * cosf(theta);
-	H->z = (1/M->r) * 2 * K * cosf(theta) * powf(sinf(theta), 2);
+void anisotropyH(Vector * H, const SphVector * M) {
+	H->x = (1/M->r) * -2 * K * cosf(M->theta) * sinf(M->theta) * cosf(M->phi) * cosf(M->theta);
+	H->y = (1/M->r) * -2 * K * cosf(M->theta) * sinf(M->theta) * sinf(M->phi) * cosf(M->theta);
+	H->z = (1/M->r) * 2 * K * cosf(M->theta) * powf(sinf(M->theta), 2);
+}
+
+//Adds rectangular vectors A and B and stores the results in A
+void addVector(Vector * A, const Vector * B) {
+	(A->x) += (B->x);
+	(A->y) += (B->y);
+	(A->z) += (B->z);
 }
 
 float phiDot(const float theta, const float phi, const Vector * H) {
@@ -94,7 +101,7 @@ int main(int argc, char *argv[]) {
 	Vector * applH = malloc(sizeof(Vector));
 	applH->x = 0.0f;
 	applH->y = 0.0f;
-	applH->z = -10e3;
+	applH->z = 2500.0f;
 
 	//The magnetization, M
 	SphVector * M = malloc(sizeof(SphVector));
@@ -102,6 +109,18 @@ int main(int argc, char *argv[]) {
 	M->theta = (1/57.3f); //Initial angle of 1 degree, 57.3 degrees in a radian
 	M->phi = 0;
 	
+	//The anisotropy field
+	Vector * anisH = malloc(sizeof(Vector));
+	anisH->x = 0.0f;
+	anisH->y = 0.0f;
+	anisH->z = 0.0f;
+
+	//The effective field
+	Vector * effH = malloc(sizeof(Vector));
+	effH->x = 0.0f;
+	effH->y = 0.0f;
+	effH->z = 0.0f;
+
 	output = fopen("output.txt", "w");
 	if(output == NULL) {
 		printf("error opening file\n");
@@ -118,12 +137,22 @@ int main(int argc, char *argv[]) {
 	
 	bool isDecreasing = true;
 	do {
-		time += endTime;
-		simulate(applH, M, endTime);
+		//anisotropyH(anisH, M);	
+
+		effH->x = 0.0f;
+		effH->y = 0.0f;
+		effH->z = 0.0f;
+
+		//addVector(effH, anisH);
+		addVector(effH, applH);
+		
+		simulate(effH, M, endTime);
 		if(applH->z + 2500.0f < 1.0f)
 			isDecreasing = false;
 		isDecreasing ? (applH->z -= 50.0f) : (applH->z += 50.0f);
-		fprintf(output, "M(%e) = %fx + %fy + %fz\n", time, M->r * sinf(M->theta) * cosf(M->phi), M->r * sinf(M->theta) * sinf(M->phi), M->r * cosf(M->theta));
+		//fprintf(output, "M(%e) = %fx + %fy + %fz\n", time, M->r * sinf(M->theta) * cosf(M->phi), M->r * sinf(M->theta) * sinf(M->phi), M->r * cosf(M->theta));
+		fprintf(output, "%e\t%f\n", applH->z, M->r * cosf(M->theta));
+		time += endTime;
 	} while(applH->z - 2500.0f < 1.0f);
 
 	printf("M(%e) = %fx + %fy + %fz\n", endTime, M->r * sinf(M->theta) * cosf(M->phi), M->r * sinf(M->theta) * sinf(M->phi), M->r * cosf(M->theta));
