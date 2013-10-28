@@ -9,9 +9,11 @@ static FILE * output;
 
 static const double ALPHA = 35186; //alpha*gamma / (1 + alpha^2)
 static const double GAMMA = 1.76e7;
-//static const double M = 1000;
 static const double TIMESTEP = .00000000005;
 static const double K = 1e6;
+//TODO: Figure out what to put in for t
+//static const double SD = ((3.45e-4)/sqrt(0.000001));
+static const double SD = 0.345;
 
 typedef struct {
 	double x;
@@ -82,9 +84,22 @@ double k4phi(const double theta, const double phi, const Vector * H) {
 }
 
 void simulate(const Vector * H, SphVector * M, const double endTime) {
+	Vector anisH;
+	Vector effH;
+	anisotropyH(&anisH, M);	
+
+	#if 1 
+	effH.x += gaussian(0, SD);
+	effH.y += gaussian(0, SD);
+	effH.z += gaussian(0, SD);
+	#endif
+
+	addVector(&effH, anisH);
+	addVector(&effH, H);
+
 	for(double t = 0; t < endTime; t += TIMESTEP) {
-		M->theta = M->theta + (1.0/6.0) * (k1theta(M->theta, M->phi, H) + 2.0 * k2theta(M->theta, M->phi, H) + 2.0 * k3theta(M->theta, M->phi, H) + k4theta(M->theta, M->phi, H)) * TIMESTEP;
-		M->phi = M->phi + (1.0/6.0) * (k1phi(M->theta, M->phi, H) + 2.0 * k2phi(M->theta, M->phi, H) + 2.0 * k3phi(M->theta, M->phi, H) + k4phi(M->theta, M->phi, H)) * TIMESTEP;
+		M->theta = M->theta + (1.0/6.0) * (k1theta(M->theta, M->phi, &effH) + 2.0 * k2theta(M->theta, M->phi, &effH) + 2.0 * k3theta(M->theta, M->phi, &effH) + k4theta(M->theta, M->phi, &effH)) * TIMESTEP;
+		M->phi = M->phi + (1.0/6.0) * (k1phi(M->theta, M->phi, &effH) + 2.0 * k2phi(M->theta, M->phi, &effH) + 2.0 * k3phi(M->theta, M->phi, &effH) + k4phi(M->theta, M->phi, &effH)) * TIMESTEP;
 	}
 	
 	//for(double t = 0; t < endTime; t += TIMESTEP) {
@@ -95,7 +110,7 @@ void simulate(const Vector * H, SphVector * M, const double endTime) {
 int main(int argc, char *argv[]) {
 	double endTime;
 	double time;
-	double sd;
+	//double sd;
 
 	//The applied field, H
 	Vector * applH = malloc(sizeof(Vector));
@@ -109,6 +124,7 @@ int main(int argc, char *argv[]) {
 	M->theta = (1/57.3f); //Initial angle of 1 degree, 57.3 degrees in a radian
 	M->phi = 0;
 	
+	#if 0
 	//The anisotropy field
 	Vector * anisH = malloc(sizeof(Vector));
 	anisH->x = 0.0;
@@ -120,6 +136,7 @@ int main(int argc, char *argv[]) {
 	effH->x = 0.0;
 	effH->y = 0.0;
 	effH->z = 0.0;
+	#endif
 
 	output = fopen("output.txt", "w");
 	if(output == NULL) {
@@ -135,25 +152,10 @@ int main(int argc, char *argv[]) {
 	else 
 		endTime = strtof(argv[1], NULL);
 	
-	sd = (3.45e-4)/sqrt(endTime);
 	bool isDecreasing = true;
 	do {
-		anisotropyH(anisH, M);	
-
-		effH->x = 0.0;
-		effH->y = 0.0;
-		effH->z = 0.0;
-
-		#if 1 
-		effH->x += gaussian(0, sd);
-		effH->y += gaussian(0, sd);
-		effH->z += gaussian(0, sd);
-		#endif
-
-		addVector(effH, anisH);
-		addVector(effH, applH);
 		
-		simulate(effH, M, endTime);
+		simulate(applH, M, endTime);
 		if(applH->z + 2500.0 < 1.0)
 			isDecreasing = false;
 		isDecreasing ? (applH->z -= 50.0) : (applH->z += 50.0);
@@ -167,8 +169,8 @@ int main(int argc, char *argv[]) {
 	fclose(output);
 	
 	free(applH);
-	free(effH);
-	free(anisH);
+	//free(effH);
+	//free(anisH);
 	free(M);
 	return 0;
 }	
