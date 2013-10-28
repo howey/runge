@@ -1,5 +1,4 @@
 //Runge-Kutta 4th Order solver
-//Compile with gcc -lm -std=c99 runge.c
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -50,46 +49,47 @@ double thetaDot(const double theta, const double phi, const Vector * H) {
 }
 
 // Terms for RK4
-double k1theta(const double theta, const Vector * H) {
-	return thetaDot(theta, 0, H);
+double k1theta(const double theta, const double phi, const Vector * H) {
+	return thetaDot(theta, phi, H);
 }
 
-double k2theta(const double theta, const Vector * H) {
-	return thetaDot(theta + 0.5 * k1theta(theta, H) * TIMESTEP, 0, H);
+double k2theta(const double theta, const double phi, const Vector * H) {
+	return thetaDot(theta + 0.5 * k1theta(theta, phi, H) * TIMESTEP, phi, H);
 }
 
-double k3theta(const double theta, const Vector * H) {
-	return thetaDot(theta + .5 * k2theta(theta, H) * TIMESTEP, 0, H);
+double k3theta(const double theta, const double phi, const Vector * H) {
+	return thetaDot(theta + .5 * k2theta(theta, phi, H) * TIMESTEP, phi, H);
 }
 
-double k4theta(const double theta, const Vector * H) {
-	return thetaDot(theta + k3theta(theta, H) * TIMESTEP, 0, H);
+double k4theta(const double theta, const double phi, const Vector * H) {
+	return thetaDot(theta + k3theta(theta, phi, H) * TIMESTEP, phi, H);
 }
 
-double k1phi(const double phi, const Vector * H) {
-	return phiDot(1, phi, H);
+double k1phi(const double theta, const double phi, const Vector * H) {
+	return phiDot(theta, phi, H);
 }
 
-double k2phi(const double phi, const Vector * H) {
-	return phiDot(1, phi+ 0.5 * k1phi(phi, H) * TIMESTEP, H);
+double k2phi(const double theta, const double phi, const Vector * H) {
+	return phiDot(theta, phi+ 0.5 * k1phi(theta, phi, H) * TIMESTEP, H);
 }
 
-double k3phi(const double phi, const Vector * H) {
-	return phiDot(1, phi + .5 * k2phi(phi, H) * TIMESTEP, H);
+double k3phi(const double theta, const double phi, const Vector * H) {
+	return phiDot(theta, phi + .5 * k2phi(theta, phi, H) * TIMESTEP, H);
 }
 
-double k4phi(const double phi, const Vector * H) {
-	return phiDot(1, phi + k3phi(phi, H) * TIMESTEP, H);
+double k4phi(const double theta, const double phi, const Vector * H) {
+	return phiDot(theta, phi + k3phi(theta, phi, H) * TIMESTEP, H);
 }
 
 void simulate(const Vector * H, SphVector * M, const double endTime) {
 	for(double t = 0; t < endTime; t += TIMESTEP) {
-		M->theta = M->theta + (1.0/6.0) * (k1theta(M->theta, H) + 2.0 * k2theta(M->theta, H) + 2.0 * k3theta(M->theta, H) + k4theta(M->theta, H)) * TIMESTEP;
+		M->theta = M->theta + (1.0/6.0) * (k1theta(M->theta, M->phi, H) + 2.0 * k2theta(M->theta, M->phi, H) + 2.0 * k3theta(M->theta, M->phi, H) + k4theta(M->theta, M->phi, H)) * TIMESTEP;
+		M->phi = M->phi + (1.0/6.0) * (k1phi(M->theta, M->phi, H) + 2.0 * k2phi(M->theta, M->phi, H) + 2.0 * k3phi(M->theta, M->phi, H) + k4phi(M->theta, M->phi, H)) * TIMESTEP;
 	}
 	
-	for(double t = 0; t < endTime; t += TIMESTEP) {
-		M->phi = M->phi + (1.0/6.0) * (k1phi(M->phi, H) + 2.0 * k2phi(M->phi, H) + 2.0 * k3phi(M->phi, H) + k4phi(M->phi, H)) * TIMESTEP;
-	}
+	//for(double t = 0; t < endTime; t += TIMESTEP) {
+		//M->phi = M->phi + (1.0/6.0) * (k1phi(M->phi, H) + 2.0 * k2phi(M->phi, H) + 2.0 * k3phi(M->phi, H) + k4phi(M->phi, H)) * TIMESTEP;
+	//}
 }
 
 int main(int argc, char *argv[]) {
@@ -138,17 +138,19 @@ int main(int argc, char *argv[]) {
 	sd = (3.45e-4)/sqrt(endTime);
 	bool isDecreasing = true;
 	do {
-		//anisotropyH(anisH, M);	
+		anisotropyH(anisH, M);	
 
 		effH->x = 0.0;
 		effH->y = 0.0;
 		effH->z = 0.0;
 
+		#if 1 
 		effH->x += gaussian(0, sd);
 		effH->y += gaussian(0, sd);
 		effH->z += gaussian(0, sd);
+		#endif
 
-		//addVector(effH, anisH);
+		addVector(effH, anisH);
 		addVector(effH, applH);
 		
 		simulate(effH, M, endTime);
