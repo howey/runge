@@ -3,13 +3,13 @@
 #include <stdlib.h>
 #include <math.h>
 #include <stdbool.h>
-#include "marsaglia-random/mars.h"
+#include "mars.h"
 
 static FILE * output;
 
 static const double ALPHA = 35186; //alpha*gamma / (1 + alpha^2)
 static const double GAMMA = 1.76e7;
-static const double TIMESTEP = .00000000005;
+static const double TIMESTEP = .000000000005;
 static const double K = 1e6;
 //TODO: Figure out what to put in for t
 //static const double SD = ((3.45e-4)/sqrt(0.000001));
@@ -88,7 +88,7 @@ void simulate(const Vector * H, SphVector * M, const double endTime) {
 	Vector effH;
 	anisotropyH(&anisH, M);	
 
-	#if 1 
+	#if 0 
 	effH.x += gaussian(0, SD);
 	effH.y += gaussian(0, SD);
 	effH.z += gaussian(0, SD);

@@ -1,3 +1,0 @@
-[submodule "marsaglia-random"]
-	path = marsaglia-random
-	url = git@github.com:howey/marsaglia-random.git
