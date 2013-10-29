@@ -94,7 +94,7 @@ void simulate(const Vector * H, SphVector * M, const double endTime) {
 	effH.z += gaussian(0, SD);
 	#endif
 
-	addVector(&effH, anisH);
+	addVector(&effH, &anisH);
 	addVector(&effH, H);
 
 	for(double t = 0; t < endTime; t += TIMESTEP) {
