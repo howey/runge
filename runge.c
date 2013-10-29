@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <stdbool.h>
+#include <fenv.h>
 #include "mars.h"
 
 static FILE * output;
@@ -85,7 +86,7 @@ double k4phi(const double theta, const double phi, const Vector * H) {
 
 void simulate(const Vector * H, SphVector * M, const double endTime) {
 	Vector anisH;
-	Vector effH;
+	Vector effH = {0, 0, 0};
 	anisotropyH(&anisH, M);	
 
 	#if 0 
@@ -111,6 +112,11 @@ int main(int argc, char *argv[]) {
 	double endTime;
 	double time;
 	//double sd;
+
+
+	//Enable divide-by-zero floating-point exceptions
+	//TODO: This gives a compiler warning. Figure out why.
+	//feenableexcept(FE_DIVBYZERO);
 
 	//The applied field, H
 	Vector * applH = malloc(sizeof(Vector));
