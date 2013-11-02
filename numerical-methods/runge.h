@@ -6,50 +6,49 @@ fourth-order Runge-Kutta method to advance the solution over an interval h and r
 incremented variables as yout[1..n] , which need not be a distinct array from y . The user
 supplies the routine derivs(x,y,dydx) , which returns derivatives dydx at x .
 */
-void rk4(double y[], double dydx[], int n, double x, double h, double yout[], void (*derivs)(double, double [], double [], int)) {
-	int i;
-	double xh, hh, h6, *dym, *dyt, *yt;
+void rk4(SphVector y[], SphVector dydx[], int n, double x, double h, SphVector yout[], void (*derivs)(double, SphVector[], SphVector[], int)) {
+	double xh, hh, h6; 
+	SphVector *dym, *dyt, *yt;
 
-	#if 0	
-	dym = vector(1, n);
-	dyt = vector(1, n);
-	yt = vector(1, n);
-	#endif
-
-	dym = (double *)malloc(sizeof(double) * n);
-	dyt = (double *)malloc(sizeof(double) * n);
-	yt = (double *)malloc(sizeof(double) * n);
-
-	#if 0
-	for(i = 0; i < n; i++) {
-		dym[i] = 1;
-		dyt[i] = 1;
-		yt[i] = 1;
-	}
-	#endif
+	dym = (SphVector *)malloc(sizeof(SphVector) * n);
+	dyt = (SphVector *)malloc(sizeof(SphVector) * n);
+	yt = (SphVector *)malloc(sizeof(SphVector) * n);
 
 	hh = h * 0.5;
 	h6 = h / 6.0;
 	xh = x + hh;
+
 	//First step
-	for (i = 0; i < n; i++)
-		yt[i] = y[i] + hh * dydx[i];
+	for (int i = 0; i < n; i++) {
+		//yt[i] = y[i] + hh * dydx[i];
+		yt[i].phi = y[i].phi + hh * dydx[i].phi;
+		yt[i].theta = y[i].theta + hh * dydx[i].theta;
+	}
 	//Second step
 	(*derivs)(xh, yt, dyt, n);
-	for (i = 0; i < n; i++)
-		yt[i] = y[i] + hh * dyt[i];
+	for (int i = 0; i < n; i++) {
+		//yt[i] = y[i] + hh * dyt[i];
+		yt[i].phi = y[i].phi + hh * dyt[i].phi;
+		yt[i].theta = y[i].theta + hh * dyt[i].theta;
+	}
 	//Third step
 	(*derivs)(xh, yt, dym, n);
-	for (i = 0; i < n; i++) {
-		yt[i] = y[i] + h * dym[i];
-		dym[i] += dyt[i];
+	for (int i = 0; i < n; i++) {
+		//yt[i] = y[i] + h * dym[i];
+		//dym[i] += dyt[i];
+		yt[i].phi = y[i].phi + h * dym[i].phi;
+		dym[i].phi += dyt[i].phi;
+		yt[i].theta = y[i].theta + h * dym[i].theta;
+		dym[i].theta += dyt[i].theta;
 	}
 	//Fourth step
 	(*derivs)(x + h, yt, dyt, n);
 	//Accumulate increments with proper weights
-	for (i = 0; i < n; i++)
-		yout[i] = y[i] + h6 * (dydx[i] + dyt[i] + 2.0 * dym[i]);
-	
+	for (int i = 0; i < n; i++) {
+		//yout[i] = y[i] + h6 * (dydx[i] + dyt[i] + 2.0 * dym[i]);
+		yout[i].phi = y[i].phi + h6 * (dydx[i].phi + dyt[i].phi + 2.0 * dym[i].phi);
+		yout[i].theta = y[i].theta + h6 * (dydx[i].theta + dyt[i].theta + 2.0 * dym[i].theta);
+	}
 	free(yt);
 	free(dyt);
 	free(dym);

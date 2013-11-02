@@ -12,7 +12,7 @@ static const double ALPHA = 35186; //alpha*gamma / (1 + alpha^2)
 static const double GAMMA = 1.76e7;
 static const double TIMESTEP = .000000000005;
 static const double K = 1e6;
-//TODO: Figure out what to put in for t
+//TODO: For t, put in TIMESTEP 
 //static const double SD = ((3.45e-4)/sqrt(0.000001));
 static const double SD = 0.345;
 
@@ -42,6 +42,7 @@ void addVector(Vector * A, const Vector * B) {
 	(A->z) += (B->z);
 }
 
+//Put in case for theta = 0
 double phiDot(const double theta, const double phi, const Vector * H) {
 	return GAMMA * ((cos(theta) * sin(phi) * H->y) / sin(theta) + (cos(theta) * cos(phi) * H->x) / sin(theta) - H->z) + ALPHA * ((cos(phi) * H->y) / sin(theta) - (sin(phi) * H->x) / sin(theta));	
 }
@@ -51,7 +52,7 @@ double thetaDot(const double theta, const double phi, const Vector * H) {
 	+ ALPHA * (cos(theta) * cos(phi) * H->x - H->z * sin(theta) + cos(theta) * sin(phi) * H->y);
 }
 
-// Terms for RK4
+// Examine RK4
 double k1theta(const double theta, const double phi, const Vector * H) {
 	return thetaDot(theta, phi, H);
 }
@@ -81,7 +82,7 @@ double k3phi(const double theta, const double phi, const Vector * H) {
 }
 
 double k4phi(const double theta, const double phi, const Vector * H) {
-	return phiDot(theta, phi + k3phi(theta, phi, H) * TIMESTEP, H);
+	return phiDot(theta, y + k3phi(theta, phi, H) * TIMESTEP, H);
 }
 
 void simulate(const Vector * H, SphVector * M, const double endTime) {
