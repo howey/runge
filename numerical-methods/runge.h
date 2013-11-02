@@ -1,5 +1,3 @@
-#include "nrutil.h"
-#include <stdlib.h>
 
 //Shamelessly copied from Numerical Recipes
 /*

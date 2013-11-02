@@ -1,5 +1,6 @@
-#include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
 #include "runge.h"
 
 static double **y, *xx;
@@ -12,6 +13,15 @@ void derivative(double t, double theta[], double dthetadt[], int n) {
 	}
 }
  
+double phiDot(const double theta, const double phi, const Vector * H) {
+	return GAMMA * ((cos(theta) * sin(phi) * H->y) / sin(theta) + (cos(theta) * cos(phi) * H->x) / sin(theta) - H->z) + ALPHA * ((cos(phi) * H->y) / sin(theta) - (sin(phi) * H->x) / sin(theta));	
+}
+
+double thetaDot(const double theta, const double phi, const Vector * H) {
+	return -GAMMA * (cos(phi) * H->y - sin(phi) * H->x)\
+	+ ALPHA * (cos(theta) * cos(phi) * H->x - H->z * sin(theta) + cos(theta) * sin(phi) * H->y);
+}
+
 /*
 Starting from initial values vstart[0..nvar-1] known at x1 use fourth-order Runge-Kutta
 to advance nstep equal increments to x2. The user-supplied routine derivs(x,v,dvdx)
