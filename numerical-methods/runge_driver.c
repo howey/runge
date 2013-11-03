@@ -1,10 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <stdbool.h>
 #include "vector.h"
 #include "runge.h"
-
-//static FILE * output;
+#include "mars.h"
 
 static const double ALPHA = 35186; //alpha*gamma / (1 + alpha^2)
 static const double GAMMA = 1.76e7;
@@ -24,6 +24,13 @@ void derivative(double t, double theta[], double dthetadt[], int n) {
 	}
 }
 #endif
+
+//Computes the anisotropy field and writes the result to a Vector H
+void anisotropyH(Vector * H, const SphVector * M) {
+	H->x = (1/M->r) * -2 * K * cos(M->theta) * sin(M->theta) * cos(M->phi) * cos(M->theta);
+	H->y = (1/M->r) * -2 * K * cos(M->theta) * sin(M->theta) * sin(M->phi) * cos(M->theta);
+	H->z = (1/M->r) * 2 * K * cos(M->theta) * pow(sin(M->theta), 2);
+}
 
 void mDot(double t, SphVector M[], SphVector dMdt[], int n) {
 	for(int i = 0; i < n; i++) {
@@ -71,7 +78,7 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	x = x1;
 	h = (x2-x1)/nstep;
 
-	for (int k = 0; k < nstep; k++) { 
+	for (int k = 0; k < nstep; k++) {
 		(*derivs)(x, v, dv, nvar);
 		rk4(v,dv,nvar,x,h,vout,derivs);
 		if ((double)(x + h) == x) fprintf(stderr, "Step size too small in routine rkdumb");
@@ -93,28 +100,36 @@ int main(int argc, char *argv[]) {
 	int nstep;
 	double endTime;
 	SphVector vstart[1]; 
+	FILE * output = fopen("output.txt", "w");
+	double sd = (3.45e-4)/sqrt(TIMESTEP);
 
-#if 0
-	vstart[0] = {1000, 0.01, 0};
-	H = {0.0, 0.0, -1e4};
-#endif
-
+	if(output == NULL) {
+		printf("error opening file\n");
+		return 0;
+	}
+	
 	vstart[0].r = 1000;
 	vstart[0].theta = 0.01;
 	vstart[0].phi = 0;
 
+#if 0
 	H.x = 0;
 	H.y = 0;
-	H.z = -1e4;
-	
-	//Get the end time for the simulation 
+	H.z = 2500;
+#endif
+
+	Vector Happl = {0.0, 0.0, 2500.0};
+	Vector Hanis = {0.0, 0.0, 0.0};
+
+	//Get the step size for the simulation 
 	if(argc < 2) {
-		printf("Usage: %s [endtime]\n", argv[0]);
+		printf("Usage: %s [step size]\n", argv[0]);
 		return 0;
 	}
 	endTime = strtof(argv[1], NULL);
 	nstep = (int)ceil(endTime/TIMESTEP);
 
+	//Allocate memory for magnetization vector
 	xx = (double *)malloc(sizeof(double) * (nstep + 1));
 	//TODO: Address y row-major
 	y = (SphVector **)malloc(sizeof(SphVector *) * nvar); 
@@ -122,9 +137,42 @@ int main(int argc, char *argv[]) {
 		y[i] = (SphVector *)malloc(sizeof(SphVector) * (nstep + 1));
 	}
 
+	
+	bool isDecreasing = true;
+	for(int i = 0; i <= 200; i++) {
+		//Thermal motion
+		H.x = gaussian(0, sd);
+		H.y = gaussian(0, sd);
+		H.z = gaussian(0, sd);
 
-	rkdumb(vstart, nvar, 0.0, endTime, nstep, mDot); 
-	for(int i = 0; i < (nstep + 1); i++) {
-		printf("%.12f\t%f\n", i * TIMESTEP, 1000*cos(y[0][i].theta));
+		//Applied field
+		H.x += Happl.x;
+		H.y += Happl.y;
+		H.z += Happl.z;
+
+		//Anisotropy field
+		anisotropyH(&Hanis, &vstart[0]);
+		H.x += Hanis.x;
+		H.y += Hanis.y;
+		H.z += Hanis.z;
+
+		//Simulate!
+		rkdumb(vstart, nvar, 0.0, endTime, nstep, mDot); 
+
+		for(int i = 0; i < (nstep + 1); i++) {
+			fprintf(output, "%f\t%f\n", H.z, 1000*cos(y[0][i].theta));
+		}
+
+		//vstart[0].r = 1000*cos(y[0][nstep].theta);
+		vstart[0].theta = y[0][nstep].theta;
+		vstart[0].phi = y[0][nstep].phi;
+		
+		//Adjust applied field strength at endTime intervals	
+		if(Happl.z + 2500.0 < 1.0) isDecreasing = false;
+		isDecreasing ? (Happl.z -= 50.0) : (Happl.z += 50.0);
 	}
+	//Probably don't really need these
+	free(xx);
+	free(y);
+	return 0;
 }
