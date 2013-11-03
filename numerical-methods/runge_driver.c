@@ -155,7 +155,9 @@ int main(int argc, char *argv[]) {
 		rkdumb(vstart, nvar, 0.0, endTime, nstep, mDot); 
 
 		for(int i = 0; i < (nstep + 1); i++) {
-			fprintf(output, "%f\t%f\n", Happl.z, 500*cos(y[0][i].theta));
+			if(!(i % 1000)) {
+				fprintf(output, "%f\t%f\n", Happl.z, 500*cos(y[0][i].theta));
+			}
 		}
 
 		vstart[0].theta = y[0][nstep].theta;
