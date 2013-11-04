@@ -154,11 +154,14 @@ int main(int argc, char *argv[]) {
 		//Simulate!
 		rkdumb(vstart, nvar, 0.0, endTime, nstep, mDot); 
 
+		fprintf(output, "%f\t%f\n", Happl.z, 500*cos(y[0][nstep].theta));
+		#if 0
 		for(int i = 0; i < (nstep + 1); i++) {
 			if(!(i % 1000)) {
 				fprintf(output, "%f\t%f\n", Happl.z, 500*cos(y[0][i].theta));
 			}
 		}
+		#endif
 
 		vstart[0].theta = y[0][nstep].theta;
 		vstart[0].phi = y[0][nstep].phi;
