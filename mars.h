@@ -2,11 +2,7 @@
 //Follows Oracle's Java implementation of nextGaussian
 //http://docs.oracle.com/javase/1.4.2/docs/api/java/util/Random.html#nextGaussian
 
-#include <stdio.h>
-#include <math.h>
-#include <stdbool.h>
 #include <time.h>
-#include <stdlib.h>
 
 #define gaussian(mean, sd) ((mean) + (sd) * nextGaussian())
 
@@ -37,15 +33,3 @@ double nextGaussian() {
 		return v1 * multiplier;
 	}
 }
-
-#if 0
-void main() {
-	srand((unsigned)time(NULL));
-	//Generate a bunch of randoms
-	//Use gnuplot to visually verify that they're actually gaussian distributed
-	for(int i = 0; i < 100000; i++) {
-		printf("%f\n", gaussian(0, 1));
-		//printf("%f\n", nextGaussian());
-	}
-}
-#endif

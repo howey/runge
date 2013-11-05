@@ -1,183 +1,144 @@
-//Runge-Kutta 4th Order solver
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <stdbool.h>
-#include <fenv.h>
+#include "vector.h"
+#include "runge.h"
 #include "mars.h"
-
-static FILE * output;
 
 static const double ALPHA = 35186; //alpha*gamma / (1 + alpha^2)
 static const double GAMMA = 1.76e7;
-static const double TIMESTEP = .000000000005;
 static const double K = 1e6;
-//TODO: For t, put in TIMESTEP 
-//static const double SD = ((3.45e-4)/sqrt(0.000001));
-static const double SD = 0.345;
+static const double TIMESTEP = 2.5e-12;
 
-typedef struct {
-	double x;
-	double y;
-	double z;
-} Vector;
-
-typedef struct {
-	double r;
-	double theta;
-	double phi;
-} SphVector;
+static double *xx;
+static SphVector **y;
+static Vector H;
 
 //Computes the anisotropy field and writes the result to a Vector H
 void anisotropyH(Vector * H, const SphVector * M) {
 	H->x = (1/M->r) * -2 * K * cos(M->theta) * sin(M->theta) * cos(M->phi) * cos(M->theta);
 	H->y = (1/M->r) * -2 * K * cos(M->theta) * sin(M->theta) * sin(M->phi) * cos(M->theta);
-	H->z = (1/M->r) * 2 * K * cos(M->theta) * pow(sin(M->theta), 2);
+	H->z = (1/M->r) * 2 * K * cos(M->theta) * sin(M->theta) * sin(M->theta);
 }
 
-//Adds rectangular vectors A and B and stores the results in A
-void addVector(Vector * A, const Vector * B) {
-	(A->x) += (B->x);
-	(A->y) += (B->y);
-	(A->z) += (B->z);
-}
-
-//Put in case for theta = 0
-double phiDot(const double theta, const double phi, const Vector * H) {
-	return GAMMA * ((cos(theta) * sin(phi) * H->y) / sin(theta) + (cos(theta) * cos(phi) * H->x) / sin(theta) - H->z) + ALPHA * ((cos(phi) * H->y) / sin(theta) - (sin(phi) * H->x) / sin(theta));	
-}
-
-double thetaDot(const double theta, const double phi, const Vector * H) {
-	return -GAMMA * (cos(phi) * H->y - sin(phi) * H->x)\
-	+ ALPHA * (cos(theta) * cos(phi) * H->x - H->z * sin(theta) + cos(theta) * sin(phi) * H->y);
-}
-
-// Examine RK4
-double k1theta(const double theta, const double phi, const Vector * H) {
-	return thetaDot(theta, phi, H);
-}
-
-double k2theta(const double theta, const double phi, const Vector * H) {
-	return thetaDot(theta + 0.5 * k1theta(theta, phi, H) * TIMESTEP, phi, H);
-}
-
-double k3theta(const double theta, const double phi, const Vector * H) {
-	return thetaDot(theta + .5 * k2theta(theta, phi, H) * TIMESTEP, phi, H);
-}
-
-double k4theta(const double theta, const double phi, const Vector * H) {
-	return thetaDot(theta + k3theta(theta, phi, H) * TIMESTEP, phi, H);
-}
-
-double k1phi(const double theta, const double phi, const Vector * H) {
-	return phiDot(theta, phi, H);
-}
-
-double k2phi(const double theta, const double phi, const Vector * H) {
-	return phiDot(theta, phi+ 0.5 * k1phi(theta, phi, H) * TIMESTEP, H);
-}
-
-double k3phi(const double theta, const double phi, const Vector * H) {
-	return phiDot(theta, phi + .5 * k2phi(theta, phi, H) * TIMESTEP, H);
-}
-
-double k4phi(const double theta, const double phi, const Vector * H) {
-	return phiDot(theta, y + k3phi(theta, phi, H) * TIMESTEP, H);
-}
-
-void simulate(const Vector * H, SphVector * M, const double endTime) {
-	Vector anisH;
-	Vector effH = {0, 0, 0};
-	anisotropyH(&anisH, M);	
-
-	#if 0 
-	effH.x += gaussian(0, SD);
-	effH.y += gaussian(0, SD);
-	effH.z += gaussian(0, SD);
-	#endif
-
-	addVector(&effH, &anisH);
-	addVector(&effH, H);
-
-	for(double t = 0; t < endTime; t += TIMESTEP) {
-		M->theta = M->theta + (1.0/6.0) * (k1theta(M->theta, M->phi, &effH) + 2.0 * k2theta(M->theta, M->phi, &effH) + 2.0 * k3theta(M->theta, M->phi, &effH) + k4theta(M->theta, M->phi, &effH)) * TIMESTEP;
-		M->phi = M->phi + (1.0/6.0) * (k1phi(M->theta, M->phi, &effH) + 2.0 * k2phi(M->theta, M->phi, &effH) + 2.0 * k3phi(M->theta, M->phi, &effH) + k4phi(M->theta, M->phi, &effH)) * TIMESTEP;
+void mDot(double t, SphVector M[], SphVector dMdt[], int n) {
+	for(int i = 0; i < n; i++) {
+		dMdt[i].phi = GAMMA * ((cos(M[i].theta) * sin(M[i].phi) * H.y) / sin(M[i].theta) + (cos(M[i].theta) * cos(M[i].phi) * H.x) / sin(M[i].theta) - H.z) + ALPHA * ((cos(M[i].phi) * H.y) / sin(M[i].theta) - (sin(M[i].phi) * H.x) / sin(M[i].theta));
+		dMdt[i].theta = -GAMMA * (cos(M[i].phi) * H.y - sin(M[i].phi) * H.x) + ALPHA * (cos(M[i].theta) * cos(M[i].phi) * H.x - H.z * sin(M[i].theta) + cos(M[i].theta) * sin(M[i].phi) * H.y);
 	}
-	
-	//for(double t = 0; t < endTime; t += TIMESTEP) {
-		//M->phi = M->phi + (1.0/6.0) * (k1phi(M->phi, H) + 2.0 * k2phi(M->phi, H) + 2.0 * k3phi(M->phi, H) + k4phi(M->phi, H)) * TIMESTEP;
-	//}
+}
+
+/*
+Starting from initial values vstart[0..nvar-1] known at x1 use fourth-order Runge-Kutta
+to advance nstep equal increments to x2. The user-supplied routine derivs(x,v,dvdx)
+evaluates derivatives. Results are stored in the global variables y[0..nvar-1][0..nstep]
+and xx[0..nstep].
+*/
+void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void (*derivs)(double, SphVector[], SphVector[], int)) {
+	double x, h;
+	SphVector *v, *vout, *dv;
+
+	v = (SphVector *)malloc(sizeof(SphVector) * nvar);
+	vout = (SphVector *)malloc(sizeof(SphVector) * nvar);
+	dv = (SphVector *)malloc(sizeof(SphVector) * nvar);
+
+	for (int i = 0;i < nvar;i++) { 
+		v[i] = vstart[i];
+		y[i][0] = v[i]; 
+	}
+
+	xx[0] = x1;
+	x = x1;
+	h = (x2-x1)/nstep;
+
+	for (int k = 0; k < nstep; k++) {
+		(*derivs)(x, v, dv, nvar);
+		rk4(v,dv,nvar,x,h,vout,derivs);
+		if ((double)(x + h) == x) fprintf(stderr, "Step size too small in routine rkdumb");
+		x += h;
+		xx[k + 1] = x;
+		for (int i = 0; i < nvar; i++) {
+			v[i] = vout[i];
+			y[i][k + 1] = v[i];
+		}
+	}
+
+	free(dv);
+	free(vout);
+	free(v);
 }
 
 int main(int argc, char *argv[]) {
+	int nvar = 2; //t, M
+	int nstep;
 	double endTime;
-	double time;
-	//double sd;
+	SphVector vstart[1]; 
+	FILE * output = fopen("output.txt", "w");
+	double sd; 
 
-
-	//Enable divide-by-zero floating-point exceptions
-	//TODO: This gives a compiler warning. Figure out why.
-	//feenableexcept(FE_DIVBYZERO);
-
-	//The applied field, H
-	Vector * applH = malloc(sizeof(Vector));
-	applH->x = 0.0;
-	applH->y = 0.0;
-	applH->z = 2500.0;
-
-	//The magnetization, M
-	SphVector * M = malloc(sizeof(SphVector));
-	M->r = 1000;
-	M->theta = (1/57.3f); //Initial angle of 1 degree, 57.3 degrees in a radian
-	M->phi = 0;
-	
-	#if 0
-	//The anisotropy field
-	Vector * anisH = malloc(sizeof(Vector));
-	anisH->x = 0.0;
-	anisH->y = 0.0;
-	anisH->z = 0.0;
-
-	//The effective field
-	Vector * effH = malloc(sizeof(Vector));
-	effH->x = 0.0;
-	effH->y = 0.0;
-	effH->z = 0.0;
-	#endif
-
-	output = fopen("output.txt", "w");
 	if(output == NULL) {
 		printf("error opening file\n");
 		return 0;
 	}
+	
+	vstart[0].r = 500;
+	vstart[0].theta = 0.01;
+	vstart[0].phi = 0;
 
-	if(argc < 2){
-		//Get time step in calculating hysterisis loop
-		printf("Usage: %s [timestep]\n", argv[0]);
+	Vector Happl = {0.0, 0.0, 2500.0};
+	Vector Hanis = {0.0, 0.0, 0.0};
+
+	//Get the step size for the simulation 
+	if(argc < 2) {
+		printf("Usage: %s [step size]\n", argv[0]);
 		return 0;
 	}
-	else 
-		endTime = strtof(argv[1], NULL);
+	endTime = strtof(argv[1], NULL);
+	nstep = (int)ceil(endTime/TIMESTEP);
+	sd = (3.45e-4)/sqrt(endTime);
+
+	//Allocate memory for magnetization vector
+	xx = (double *)malloc(sizeof(double) * (nstep + 1));
+	//TODO: Address y row-major
+	y = (SphVector **)malloc(sizeof(SphVector *) * nvar); 
+	for(int i = 0; i < nvar; i++) {
+		y[i] = (SphVector *)malloc(sizeof(SphVector) * (nstep + 1));
+	}
+
 	
 	bool isDecreasing = true;
-	do {
-		
-		simulate(applH, M, endTime);
-		if(applH->z + 2500.0 < 1.0)
-			isDecreasing = false;
-		isDecreasing ? (applH->z -= 50.0) : (applH->z += 50.0);
-		//fprintf(output, "M(%e) = %fx + %fy + %fz\n", time, M->r * sin(M->theta) * cos(M->phi), M->r * sin(M->theta) * sin(M->phi), M->r * cos(M->theta));
-		fprintf(output, "%e\t%f\n", applH->z, M->r * cos(M->theta));
-		time += endTime;
-	} while(applH->z - 2500.0 < 1.0);
+	for(int i = 0; i <= 200; i++) {
+		//Thermal motion
+		H.x = gaussian(0, sd);
+		H.y = gaussian(0, sd);
+		H.z = gaussian(0, sd);
 
-	printf("M(%e) = %fx + %fy + %fz\n", endTime, M->r * sin(M->theta) * cos(M->phi), M->r * sin(M->theta) * sin(M->phi), M->r * cos(M->theta));
-	
-	fclose(output);
-	
-	free(applH);
-	//free(effH);
-	//free(anisH);
-	free(M);
+		//Applied field
+		H.x += Happl.x;
+		H.y += Happl.y;
+		H.z += Happl.z;
+
+		//Anisotropy field
+		anisotropyH(&Hanis, &vstart[0]);
+		H.x += Hanis.x;
+		H.y += Hanis.y;
+		H.z += Hanis.z;
+
+		//Simulate!
+		rkdumb(vstart, nvar, 0.0, endTime, nstep, mDot); 
+
+		fprintf(output, "%f\t%f\n", Happl.z, 500*cos(y[0][nstep].theta));
+
+		vstart[0].theta = y[0][nstep].theta;
+		vstart[0].phi = y[0][nstep].phi;
+		
+		//Adjust applied field strength at endTime intervals	
+		if(Happl.z + 2500.0 < 1.0) isDecreasing = false;
+		isDecreasing ? (Happl.z -= 50.0) : (Happl.z += 50.0);
+	}
+	//Probably don't really need these
+	free(xx);
+	free(y);
 	return 0;
-}	
+}
