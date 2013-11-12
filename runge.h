@@ -21,6 +21,7 @@ void rk4(SphVector y[], SphVector dydx[], int n, double x, double h, SphVector y
 	//First step
 	for (int i = 0; i < n; i++) {
 		//yt[i] = y[i] + hh * dydx[i];
+		yt[i].r = y[i].r + hh * dydx[i].r;
 		yt[i].phi = y[i].phi + hh * dydx[i].phi;
 		yt[i].theta = y[i].theta + hh * dydx[i].theta;
 	}
@@ -28,6 +29,7 @@ void rk4(SphVector y[], SphVector dydx[], int n, double x, double h, SphVector y
 	(*derivs)(xh, yt, dyt, n);
 	for (int i = 0; i < n; i++) {
 		//yt[i] = y[i] + hh * dyt[i];
+		yt[i].r = y[i].r + hh * dyt[i].r;
 		yt[i].phi = y[i].phi + hh * dyt[i].phi;
 		yt[i].theta = y[i].theta + hh * dyt[i].theta;
 	}
@@ -36,6 +38,8 @@ void rk4(SphVector y[], SphVector dydx[], int n, double x, double h, SphVector y
 	for (int i = 0; i < n; i++) {
 		//yt[i] = y[i] + h * dym[i];
 		//dym[i] += dyt[i];
+		yt[i].r = y[i].r + h * dym[i].r;
+		dym[i].r += dyt[i].r;
 		yt[i].phi = y[i].phi + h * dym[i].phi;
 		dym[i].phi += dyt[i].phi;
 		yt[i].theta = y[i].theta + h * dym[i].theta;
@@ -46,6 +50,7 @@ void rk4(SphVector y[], SphVector dydx[], int n, double x, double h, SphVector y
 	//Accumulate increments with proper weights
 	for (int i = 0; i < n; i++) {
 		//yout[i] = y[i] + h6 * (dydx[i] + dyt[i] + 2.0 * dym[i]);
+		yout[i].r = y[i].r + h6 * (dydx[i].r + dyt[i].r + 2.0 * dym[i].r);
 		yout[i].phi = y[i].phi + h6 * (dydx[i].phi + dyt[i].phi + 2.0 * dym[i].phi);
 		yout[i].theta = y[i].theta + h6 * (dydx[i].theta + dyt[i].theta + 2.0 * dym[i].theta);
 	}
