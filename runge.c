@@ -38,6 +38,7 @@ and xx[0..nstep].
 void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void (*derivs)(double, SphVector[], SphVector[], int)) {
 	double x, h;
 	SphVector *v, *vout, *dv;
+	Vector Hanis = {0.0, 0.0, 0.0};
 
 	v = (SphVector *)malloc(sizeof(SphVector) * nvar);
 	vout = (SphVector *)malloc(sizeof(SphVector) * nvar);
@@ -53,6 +54,19 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	h = (x2-x1)/nstep;
 
 	for (int k = 0; k < nstep; k++) {
+		//Add anisotropy
+		if(k != 0) {
+			//Remove anisotropy from last step
+			anisotropyH(&Hanis, &y[0][k-1]);
+			H.x -= Hanis.x;
+			H.y -= Hanis.y;
+			H.z -= Hanis.z;
+			//Add in new anisotropy
+			anisotropyH(&Hanis, &y[0][k]);
+			H.x += Hanis.x;
+			H.y += Hanis.y;
+			H.z += Hanis.z;
+		}
 		(*derivs)(x, v, dv, nvar);
 		rk4(v,dv,nvar,x,h,vout,derivs);
 		if ((double)(x + h) == x) fprintf(stderr, "Step size too small in routine rkdumb");
@@ -119,11 +133,13 @@ int main(int argc, char *argv[]) {
 		H.y += Happl.y;
 		H.z += Happl.z;
 
+		#if 0
 		//Anisotropy field
 		anisotropyH(&Hanis, &vstart[0]);
 		H.x += Hanis.x;
 		H.y += Hanis.y;
 		H.z += Hanis.z;
+		#endif
 
 		//Simulate!
 		rkdumb(vstart, nvar, 0.0, endTime, nstep, mDot); 
