@@ -9,7 +9,7 @@
 static const double ALPHA = 35186; //alpha*gamma / (1 + alpha^2)
 static const double GAMMA = 1.76e7;
 static const double K = 1e6;
-static const double TIMESTEP = 2.5e-12;
+static const double TIMESTEP = 2.5e-14;
 
 static double *xx;
 static SphVector **y;
@@ -55,6 +55,8 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 
 	for (int k = 0; k < nstep; k++) {
 
+		//TODO: Add in thermal motion
+		
 		//Add in anisotropy
 		anisotropyH(&Hanis, &y[0][k]);
 		H.x += Hanis.x;
@@ -146,6 +148,7 @@ int main(int argc, char *argv[]) {
 
 		fprintf(output, "%f\t%f\n", Happl.z, (y[0][nstep].r)*cos(y[0][nstep].theta));
 
+		vstart[0].r = y[0][nstep].r;
 		vstart[0].theta = y[0][nstep].theta;
 		vstart[0].phi = y[0][nstep].phi;
 		
