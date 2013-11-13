@@ -147,6 +147,7 @@ int main(int argc, char *argv[]) {
 		rkdumb(vstart, nvar, 0.0, endTime, nstep, mDot); 
 
 		fprintf(output, "%f\t%f\n", Happl.z, (y[0][nstep].r)*cos(y[0][nstep].theta));
+		printf("%3.1f%% complete\n", 0.5 * i);
 
 		vstart[0].r = y[0][nstep].r;
 		vstart[0].theta = y[0][nstep].theta;
