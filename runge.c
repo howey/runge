@@ -6,10 +6,11 @@
 #include "runge.h"
 #include "mars.h"
 
-static const double ALPHA = 35186; //alpha*gamma / (1 + alpha^2)
-static const double GAMMA = 1.76e7;
+/* Time is in units of us */
+static const double ALPHA = 0.035186; //alpha*gamma / (1 + alpha^2)
+static const double GAMMA = 1.76e1;
 static const double K = 1e6;
-static const double TIMESTEP = (1e-8);	//Scaled by 1e5
+static const double TIMESTEP = (1e-6);	
 
 static double *xx;
 static SphVector **y;
@@ -110,9 +111,9 @@ int main(int argc, char *argv[]) {
 		printf("Usage: %s [step size]\n", argv[0]);
 		return 0;
 	}
-	endTime = (1e5)*strtof(argv[1], NULL); //Scaled by 1e5
+	endTime = (1e6)*strtof(argv[1], NULL); //In us
 	nstep = (int)ceil(endTime/TIMESTEP);
-	sd = (3.45e-4)/sqrt(endTime);
+	sd = (3.45e-4)/sqrt(endTime); //TODO: Adjust units for us
 
 	//Allocate memory for magnetization vector
 	xx = (double *)malloc(sizeof(double) * (nstep + 1));
