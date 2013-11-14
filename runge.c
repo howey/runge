@@ -9,7 +9,7 @@
 static const double ALPHA = 35186; //alpha*gamma / (1 + alpha^2)
 static const double GAMMA = 1.76e7;
 static const double K = 1e6;
-static const double TIMESTEP = 2.5e-14;
+static const double TIMESTEP = (1e-8);	//Scaled by 1e5
 
 static double *xx;
 static SphVector **y;
@@ -110,7 +110,7 @@ int main(int argc, char *argv[]) {
 		printf("Usage: %s [step size]\n", argv[0]);
 		return 0;
 	}
-	endTime = strtof(argv[1], NULL);
+	endTime = (1e5)*strtof(argv[1], NULL); //Scaled by 1e5
 	nstep = (int)ceil(endTime/TIMESTEP);
 	sd = (3.45e-4)/sqrt(endTime);
 
