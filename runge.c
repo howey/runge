@@ -54,15 +54,23 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	x = x1;
 	h = (x2-x1)/nstep;
 
+	double sd = 0.34/sqrt(TIMESTEP);
 	for (int k = 0; k < nstep; k++) {
 
-		//TODO: Add in thermal motion
-		
+		// Add in thermal motion
+		double thermX = gaussian(0, sd);
+		double thermY = gaussian(0, sd);
+		double thermZ = gaussian(0, sd);
+
 		//Add in anisotropy
 		anisotropyH(&Hanis, &y[0][k]);
 		H.x += Hanis.x;
 		H.y += Hanis.y;
 		H.z += Hanis.z;
+
+		H.x += thermX;
+		H.y += thermY;
+		H.z += thermZ;
 
 		(*derivs)(x, v, dv, nvar);
 		rk4(v,dv,nvar,x,h,vout,derivs);
@@ -79,6 +87,11 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 		H.x -= Hanis.x;
 		H.y -= Hanis.y;
 		H.z -= Hanis.z;
+
+		//Remove thermal motion
+		H.x -= thermX;
+		H.y -= thermY;
+		H.z -= thermZ;
 	}
 
 	free(dv);
@@ -92,7 +105,6 @@ int main(int argc, char *argv[]) {
 	double endTime;
 	SphVector vstart[1]; 
 	FILE * output = fopen("output.txt", "w");
-	double sd; 
 
 	if(output == NULL) {
 		printf("error opening file\n");
@@ -113,7 +125,6 @@ int main(int argc, char *argv[]) {
 	}
 	endTime = (1e6)*strtof(argv[1], NULL); //In us
 	nstep = (int)ceil(endTime/TIMESTEP);
-	sd = (3.45e-4)/sqrt(endTime); //TODO: Adjust units for us
 
 	//Allocate memory for magnetization vector
 	xx = (double *)malloc(sizeof(double) * (nstep + 1));
@@ -126,24 +137,11 @@ int main(int argc, char *argv[]) {
 	
 	bool isDecreasing = true;
 	for(int i = 0; i <= 200; i++) {
-		//Thermal motion
-		H.x = gaussian(0, sd);
-		H.y = gaussian(0, sd);
-		H.z = gaussian(0, sd);
-
 		//Applied field
 		H.x += Happl.x;
 		H.y += Happl.y;
 		H.z += Happl.z;
-
-		#if 0
-		//Anisotropy field
-		anisotropyH(&Hanis, &vstart[0]);
-		H.x += Hanis.x;
-		H.y += Hanis.y;
-		H.z += Hanis.z;
-		#endif
-
+		
 		//Simulate!
 		rkdumb(vstart, nvar, 0.0, endTime, nstep, mDot); 
 
