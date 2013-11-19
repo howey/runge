@@ -10,21 +10,22 @@
 static const double ALPHA = 0.035186; //alpha*gamma / (1 + alpha^2)
 static const double GAMMA = 1.76e1;
 static const double K = 1e6;
-static const double TIMESTEP = (1e-6);	
+static const double TIMESTEP = (1e-8);	
 
 static double *xx;
 static SphVector **y;
 static Vector H;
 
 //Computes the anisotropy field and writes the result to a Vector H
-void anisotropyH(Vector * H, const SphVector * M) {
-	H->x = (1/M->r) * -2 * K * cos(M->theta) * sin(M->theta) * cos(M->phi) * cos(M->theta);
-	H->y = (1/M->r) * -2 * K * cos(M->theta) * sin(M->theta) * sin(M->phi) * cos(M->theta);
-	H->z = (1/M->r) * 2 * K * cos(M->theta) * sin(M->theta) * sin(M->theta);
+void anisotropyH(Vector * Ha, const SphVector * M) {
+	Ha->x = (1/M->r) * -2 * K * cos(M->theta) * sin(M->theta) * cos(M->phi) * cos(M->theta);
+	Ha->y = (1/M->r) * -2 * K * cos(M->theta) * sin(M->theta) * sin(M->phi) * cos(M->theta);
+	Ha->z = (1/M->r) * 2 * K * cos(M->theta) * sin(M->theta) * sin(M->theta);
 }
 
 void mDot(double t, SphVector M[], SphVector dMdt[], int n) {
 	for(int i = 0; i < n; i++) {
+		dMdt[i].r = 0;
 		dMdt[i].phi = GAMMA * ((cos(M[i].theta) * sin(M[i].phi) * H.y) / sin(M[i].theta) + (cos(M[i].theta) * cos(M[i].phi) * H.x) / sin(M[i].theta) - H.z) + ALPHA * ((cos(M[i].phi) * H.y) / sin(M[i].theta) - (sin(M[i].phi) * H.x) / sin(M[i].theta));
 		dMdt[i].theta = -GAMMA * (cos(M[i].phi) * H.y - sin(M[i].phi) * H.x) + ALPHA * (cos(M[i].theta) * cos(M[i].phi) * H.x - H.z * sin(M[i].theta) + cos(M[i].theta) * sin(M[i].phi) * H.y);
 	}
@@ -116,7 +117,6 @@ int main(int argc, char *argv[]) {
 	vstart[0].phi = 0;
 
 	Vector Happl = {0.0, 0.0, 2500.0};
-	Vector Hanis = {0.0, 0.0, 0.0};
 
 	//Get the step size for the simulation 
 	if(argc < 2) {
@@ -138,9 +138,9 @@ int main(int argc, char *argv[]) {
 	bool isDecreasing = true;
 	for(int i = 0; i <= 200; i++) {
 		//Applied field
-		H.x += Happl.x;
-		H.y += Happl.y;
-		H.z += Happl.z;
+		H.x = Happl.x;
+		H.y = Happl.y;
+		H.z = Happl.z;
 		
 		//Simulate!
 		rkdumb(vstart, nvar, 0.0, endTime, nstep, mDot); 
