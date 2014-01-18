@@ -73,7 +73,8 @@ void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVect
 
 	//device arrays
 	SphVector *dym_d, *dyt_d, *yt_d, *yout_d;
-	
+
+	//thread dimensions for mDot kernel	
 	dim3 blockDim(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
 	dim3 gridDim(ceil(WIDTH/BLOCK_SIZE), ceil(HEIGHT/BLOCK_SIZE), ceil(DEPTH/BLOCK_SIZE));	
 
@@ -93,9 +94,8 @@ void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVect
 	h6 = h / 6.0;
 	xh = x + hh;
 
-	cudaMemcpy(y_d, y, sizeof(SphVector) * n, cudaMemcpyHostToDevice);
-
 	//First step
+	rk4First<<<ceil(512.0/n), 512>>>(yt_d, y_d, dydx_d, hh, n);
 	/*
 	for (int i = 0; i < n; i++) {
 		//yt[i] = y[i] + hh * dydx[i];
@@ -104,9 +104,7 @@ void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVect
 		yt[i].theta = y[i].theta + hh * dydx[i].theta;
 	}
 	*/
-	rk4First<<<ceil(512.0/n), 512>>>(yt_d, y_d, dydx_d, hh, n);
 	//Second step
-	//launch the kernel
 	(*derivs)<<<gridDim, blockDim>>>(xh, yt_d, dyt_d, n, H);
 	rk4Second<<<ceil(512.0/n), 512>>>(yt_d, y_d, dyt_d, hh, n);
 	/*
@@ -245,7 +243,6 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 
 		//Copy memory to device
 		cudaMemcpy(v_d, v, sizeof(SphVector) * nvar, cudaMemcpyHostToDevice);
-		cudaMemcpy(dv_d, dv, sizeof(SphVector) * nvar, cudaMemcpyHostToDevice);
 
 		//Call the kernel
 		(*derivs)<<<gridDim, blockDim>>>(x, v_d, dv_d, nvar, H);
