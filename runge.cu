@@ -321,7 +321,7 @@ int main(int argc, char *argv[]) {
 		//Simulate!
 		rkdumb(vstart, nvar, 0.0, endTime, nstep, mDot); 
 
-		fprintf(stdout, "%f\t%f\n", Happl.z, (y[0][nstep].r)*cos(y[0][nstep].theta));
+		fprintf(output, "%f\t%f\n", Happl.z, (y[0][nstep].r)*cos(y[0][nstep].theta));
 
 		for(int i = 0; i < nvar; i++) {
 			vstart[i].r = y[i][nstep].r;
