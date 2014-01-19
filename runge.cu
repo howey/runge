@@ -298,10 +298,16 @@ int main(int argc, char *argv[]) {
 	//Get the step size for the simulation 
 	if(argc < 2) {
 		printf("Usage: %s [step size]\n", argv[0]);
-		return 0;
+		return 1;
 	}
 	endTime = (1e9)*strtof(argv[1], NULL); //In ns
-	nstep = (int)ceil(endTime/TIMESTEP);
+	nstep = ((int)ceil(endTime/TIMESTEP));
+
+	if((nstep % 1000) == 0) nstep /= 1000; //Divide by 1000 to reduce host memory usage
+	else {
+		fprintf(stderr, "Error: please select step size such that nstep is a multiple of 1000\n");
+		return 1;
+	}
 
 	xx = (double *)malloc(sizeof(double) * (nstep + 1));
 	//TODO: Address y row-major
@@ -313,25 +319,27 @@ int main(int argc, char *argv[]) {
 	
 	bool isDecreasing = true;
 	for(int i = 0; i <= 400; i++) {
-		//Applied field
-		H.x = Happl.x;
-		H.y = Happl.y;
-		H.z = Happl.z;
-		
-		//Simulate!
-		rkdumb(vstart, nvar, 0.0, endTime, nstep, mDot); 
+		for(int j = 0; j < 1000; j++) {
+			//Applied field
+			H.x = Happl.x;
+			H.y = Happl.y;
+			H.z = Happl.z;
+			
+			//Simulate!
+			rkdumb(vstart, nvar, 0.0, endTime, nstep, mDot); 
 
-		fprintf(output, "%f\t%f\n", Happl.z, (y[0][nstep].r)*cos(y[0][nstep].theta));
+			if(j == 999) fprintf(output, "%f\t%f\n", Happl.z, (y[0][nstep].r)*cos(y[0][nstep].theta));
 
-		for(int i = 0; i < nvar; i++) {
-			vstart[i].r = y[i][nstep].r;
-			vstart[i].theta = y[i][nstep].theta;
-			vstart[i].phi = y[i][nstep].phi;
+			for(int i = 0; i < nvar; i++) {
+				vstart[i].r = y[i][nstep].r;
+				vstart[i].theta = y[i][nstep].theta;
+				vstart[i].phi = y[i][nstep].phi;
+			}
+
+			//Adjust applied field strength at endTime intervals	
+			if(Happl.z + 5000.0 < 1.0) isDecreasing = false;
+			isDecreasing ? (Happl.z -= 50.0) : (Happl.z += 50.0);
 		}
-
-		//Adjust applied field strength at endTime intervals	
-		if(Happl.z + 5000.0 < 1.0) isDecreasing = false;
-		isDecreasing ? (Happl.z -= 50.0) : (Happl.z += 50.0);
 	}
 	//Probably don't really need these since we're about to exit the program
 	free(xx);
