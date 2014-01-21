@@ -361,27 +361,29 @@ int main(int argc, char *argv[]) {
 	
 	bool isDecreasing = true;
 	for(int i = 0; i <= 400; i++) {
+		//Applied field
+		H.x = Happl.x;
+		H.y = Happl.y;
+		H.z = Happl.z;
+
 		for(int j = 0; j < 1000; j++) {
-			//Applied field
-			H.x = Happl.x;
-			H.y = Happl.y;
-			H.z = Happl.z;
-			
 			//Simulate!
 			rkdumb(vstart, nvar, 0.0, endTime, nstep, mDot); 
-
-			if(j == 999) fprintf(output, "%f\t%f\n", Happl.z, (y[0][nstep].r)*cos(y[0][nstep].theta));
 
 			for(int i = 0; i < nvar; i++) {
 				vstart[i].r = y[i][nstep].r;
 				vstart[i].theta = y[i][nstep].theta;
 				vstart[i].phi = y[i][nstep].phi;
 			}
-
-			//Adjust applied field strength at endTime intervals	
-			if(Happl.z + 5000.0 < 1.0) isDecreasing = false;
-			isDecreasing ? (Happl.z -= 50.0) : (Happl.z += 50.0);
 		}
+
+		for(int k = 0; k < nvar; k++) {
+			fprintf(output, "%f\t%f\n", Happl.z, (y[k][nstep].r)*cos(y[k][nstep].theta));
+		}
+
+		//Adjust applied field strength at endTime intervals	
+		if(Happl.z + 5000.0 < 1.0) isDecreasing = false;
+		isDecreasing ? (Happl.z -= 50.0) : (Happl.z += 50.0);
 	}
 	//Probably don't really need these since we're about to exit the program
 	free(xx);
