@@ -6,4 +6,4 @@
 
 #define BLOCK_SIZE 4 //Side length of CUDA block
 
-__global__ void mDot(double, SphVector, SphVector, int, Vector);
+__global__ void mDot(double, SphVector[], SphVector[], int, Vector[]);

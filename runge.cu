@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <stdbool.h>
+#include <curand_kernel.h>
 #include "vector.h"
 #include "runge.h"
 #include "mars.h"
@@ -19,6 +20,7 @@ static const double JEX = 1;
 static double *xx;
 static SphVector **y;
 static Vector H;
+static Vector *H_d;
 
 __global__ void rk4First(SphVector *yt_d, SphVector *y_d, SphVector * dydx_d, double hh, int n) {
 	//TODO: Use shared memory
@@ -67,7 +69,7 @@ fourth-order Runge-Kutta method to advance the solution over an interval h and r
 incremented variables as yout[1..n] , which need not be a distinct array from y . The user
 supplies the routine derivs(x,y,dydx) , which returns derivatives dydx at x .
 */
-void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVector yout[], void (*derivs)(double, SphVector[], SphVector[], int, Vector)) {
+void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVector yout[], void (*derivs)(double, SphVector[], SphVector[], int, Vector[])) {
 	double xh, hh, h6; 
 	//SphVector *dym, *dyt, *yt;
 
@@ -223,14 +225,14 @@ to advance nstep equal increments to x2. The user-supplied routine derivs(x,v,dv
 evaluates derivatives. Results are stored in the global variables y[0..nvar-1][0..nstep]
 and xx[0..nstep].
 */
-void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void (*derivs)(double, SphVector[], SphVector[], int, Vector)) {
+void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void (*derivs)(double, SphVector[], SphVector[], int, Vector[])) {
 	double x, h;
 	dim3 blockDim(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
         dim3 gridDim(ceil(WIDTH/BLOCK_SIZE), ceil(HEIGHT/BLOCK_SIZE), ceil(DEPTH/BLOCK_SIZE));	
 	SphVector *v, *vout, *dv;
 
 	//device arrays
-	SphVector *v_d, *dv_d, *H_d;
+	SphVector *v_d, *dv_d;
 	//Vector Hanis = {0.0, 0.0, 0.0};
 
 	v = (SphVector *)malloc(sizeof(SphVector) * nvar);
