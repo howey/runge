@@ -74,10 +74,6 @@ void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVect
 	//device arrays
 	SphVector *dym_d, *dyt_d, *yt_d, *yout_d;
 
-	//thread dimensions for mDot kernel	
-	dim3 blockDim(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
-	dim3 gridDim(ceil(WIDTH/BLOCK_SIZE), ceil(HEIGHT/BLOCK_SIZE), ceil(DEPTH/BLOCK_SIZE));	
-
 	/*
 	dym = (SphVector *)malloc(sizeof(SphVector) * n);
 	dyt = (SphVector *)malloc(sizeof(SphVector) * n);
@@ -95,7 +91,7 @@ void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVect
 	xh = x + hh;
 
 	//First step
-	rk4First<<<ceil(512.0/n), 512>>>(yt_d, y_d, dydx_d, hh, n);
+	rk4First<<<ceil(n/512.0), 512>>>(yt_d, y_d, dydx_d, hh, n);
 	/*
 	for (int i = 0; i < n; i++) {
 		//yt[i] = y[i] + hh * dydx[i];
@@ -105,8 +101,8 @@ void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVect
 	}
 	*/
 	//Second step
-	(*derivs)<<<gridDim, blockDim>>>(xh, yt_d, dyt_d, n, H);
-	rk4Second<<<ceil(512.0/n), 512>>>(yt_d, y_d, dyt_d, hh, n);
+	(*derivs)<<<ceil(n/512.0), 512>>>(xh, yt_d, dyt_d, n, H_d);
+	rk4Second<<<ceil(n/512.0), 512>>>(yt_d, y_d, dyt_d, hh, n);
 	/*
 	for (int i = 0; i < n; i++) {
 		//yt[i] = y[i] + hh * dyt[i];
@@ -116,8 +112,8 @@ void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVect
 	}
 	*/
 	//Third step
-	(*derivs)<<<gridDim, blockDim>>>(xh, yt_d, dym_d, n, H);
-	rk4Third<<<ceil(512.0/n), 512>>>(yt_d, y_d, dym_d, dyt_d, h, n);
+	(*derivs)<<<ceil(n/512.0), 512>>>(xh, yt_d, dym_d, n, H_d);
+	rk4Third<<<ceil(n/512.0), 512>>>(yt_d, y_d, dym_d, dyt_d, h, n);
 	/*
 	for (int i = 0; i < n; i++) {
 		//yt[i] = y[i] + h * dym[i];
@@ -131,9 +127,9 @@ void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVect
 	}
 	*/
 	//Fourth step
-	(*derivs)<<<gridDim, blockDim>>>(x + h, yt_d, dyt_d, n, H);
+	(*derivs)<<<ceil(n/512.0), 512>>>(x + h, yt_d, dyt_d, n, H_d);
 	//Accumulate increments with proper weights
-	rk4Fourth<<<ceil(512.0/n), 512>>>(yout_d, y_d, dydx_d, dyt_d, dym_d, h6, n);
+	rk4Fourth<<<ceil(n/512.0), 512>>>(yout_d, y_d, dydx_d, dyt_d, dym_d, h6, n);
 	/*
 	for (int i = 0; i < n; i++) {
 		//yout[i] = y[i] + h6 * (dydx[i] + dyt[i] + 2.0 * dym[i]);
@@ -159,30 +155,65 @@ void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVect
 	cudaFree(yout_d);
 }
 
+/*
 //Computes the anisotropy field and writes the result to a Vector H
 void anisotropyH(Vector * Ha, const SphVector * M) {
 	Ha->x = (1/M->r) * -2 * KANIS * cos(M->theta) * sin(M->theta) * cos(M->phi) * cos(M->theta);
 	Ha->y = (1/M->r) * -2 * KANIS * cos(M->theta) * sin(M->theta) * sin(M->phi) * cos(M->theta);
 	Ha->z = (1/M->r) * 2 * KANIS * cos(M->theta) * sin(M->theta) * sin(M->theta);
 }
+*/
 
-__global__ void mDot(double t, SphVector M[], SphVector dMdt[], int nvar, Vector H) {
+//Computes the local applied field for every atom of moment M. The global applied field is passed in as H. 
+__global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar) {
 	//Thread coordinates
 	int tx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
 	int ty = blockIdx.y * BLOCK_SIZE + threadIdx.y;
 	int tz = blockIdx.z * BLOCK_SIZE + threadIdx.z;
-
 	int i = tz * WIDTH * HEIGHT +  ty * WIDTH + tx;
+	
+	curandState_t state;
 
-	//The field produced by nearest-neighbor exchange interaction
-	SphVector Hex = {0.0, 0.0, 0.0};
+	//initialize RNG
+	//TODO: this should probably get a real seed
+	curand_init(1234, i, 0, &state);
 
+	if(i < nvar) {
+		//the applied field
+		H_d[i].x = H.x;
+		H_d[i].y = H.y;
+		H_d[i].z = H.z;
+
+		//the anisotropy field
+		H_d[i].x += (1/M[i].r) * -2 * KANIS * cos(M[i].theta) * sin(M[i].theta) * cos(M[i].phi) * cos(M[i].theta);
+		H_d[i].y += (1/M[i].r) * -2 * KANIS * cos(M[i].theta) * sin(M[i].theta) * sin(M[i].phi) * cos(M[i].theta);
+		H_d[i].z += (1/M[i].r) * 2 * KANIS * cos(M[i].theta) * sin(M[i].theta) * sin(M[i].theta);
+
+		//the field from random thermal motion
+		//TODO: sd doesn't have to be computed each time, it is constant
+		#if USE_THERMAL
+		double sd = 3.4e-4/sqrt(TIMESTEP * 1e-9);
+		double thermX = sd * curand_normal_double(&state); 
+		double thermY = sd * curand_normal_double(&state);
+		double thermZ = sd * curand_normal_double(&state);
+
+		H_d[i].x += thermX;
+		H_d[i].y += thermY;
+		H_d[i].z += thermZ;
+		#endif
+
+		//TODO: the exchange field
+	}
+}
+
+__global__ void mDot(double t, SphVector M[], SphVector dMdt[], int nvar, Vector H[]) {
+	int i = threadIdx.x + blockDim.x * blockIdx.x;
 
 	//Compute derivative
 	if(i < nvar) {
 		dMdt[i].r = 0;
-		dMdt[i].phi = GAMMA * ((cos(M[i].theta) * sin(M[i].phi) * H.y) / sin(M[i].theta) + (cos(M[i].theta) * cos(M[i].phi) * H.x) / sin(M[i].theta) - H.z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(M[i].phi) * H.y) / sin(M[i].theta) - (sin(M[i].phi) * H.x) / sin(M[i].theta));
-		dMdt[i].theta = -GAMMA * (cos(M[i].phi) * H.y - sin(M[i].phi) * H.x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(M[i].theta) * cos(M[i].phi) * H.x - H.z * sin(M[i].theta) + cos(M[i].theta) * sin(M[i].phi) * H.y);
+		dMdt[i].phi = GAMMA * ((cos(M[i].theta) * sin(M[i].phi) * H[i].y) / sin(M[i].theta) + (cos(M[i].theta) * cos(M[i].phi) * H[i].x) / sin(M[i].theta) - H[i].z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(M[i].phi) * H[i].y) / sin(M[i].theta) - (sin(M[i].phi) * H[i].x) / sin(M[i].theta));
+		dMdt[i].theta = -GAMMA * (cos(M[i].phi) * H[i].y - sin(M[i].phi) * H[i].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(M[i].theta) * cos(M[i].phi) * H[i].x - H[i].z * sin(M[i].theta) + cos(M[i].theta) * sin(M[i].phi) * H[i].y);
 	}
 }
 
@@ -199,8 +230,8 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	SphVector *v, *vout, *dv;
 
 	//device arrays
-	SphVector *v_d, *dv_d;
-	Vector Hanis = {0.0, 0.0, 0.0};
+	SphVector *v_d, *dv_d, *H_d;
+	//Vector Hanis = {0.0, 0.0, 0.0};
 
 	v = (SphVector *)malloc(sizeof(SphVector) * nvar);
 	vout = (SphVector *)malloc(sizeof(SphVector) * nvar);
@@ -209,6 +240,7 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	//allocate device memory for mDot
 	cudaMalloc((void **)&v_d, sizeof(SphVector) * nvar);
 	cudaMalloc((void **)&dv_d, sizeof(SphVector) * nvar);
+	cudaMalloc((void **)&H_d, sizeof(SphVector) * nvar);
 	
 	for (int i = 0;i < nvar;i++) { 
 		v[i] = vstart[i];
@@ -222,6 +254,7 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	double sd = 3.4e-4/sqrt(TIMESTEP * 1e-9);
 	for (int k = 0; k < nstep; k++) {
 
+		/*
 		// Add in thermal motion
 		#if USE_THERMAL 
 		double thermX = gaussian(0, sd);
@@ -240,12 +273,17 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 		H.y += thermY;
 		H.z += thermZ;
 		#endif
+		*/
 
 		//Copy memory to device
+		//TODO: this could probably be eliminated by keeping v_d from the previous step on the device
 		cudaMemcpy(v_d, v, sizeof(SphVector) * nvar, cudaMemcpyHostToDevice);
 
-		//Call the kernel
-		(*derivs)<<<gridDim, blockDim>>>(x, v_d, dv_d, nvar, H);
+		//Launch kernel to compute H field
+		computeField<<<gridDim, blockDim>>>(H_d, H, v_d, nvar);	
+
+		//Launch kernel to compute derivatives
+		(*derivs)<<<ceil(nvar/512.0), 512>>>(x, v_d, dv_d, nvar, H_d);
 		
 		rk4(v_d,dv_d,nvar,x,h,vout,derivs);
 		if ((double)(x + h) == x) fprintf(stderr, "Step size too small in routine rkdumb");
@@ -256,6 +294,7 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 			y[i][k + 1] = v[i];
 		}
 
+		/*
 		//Remove anisotropy for next step 
 		anisotropyH(&Hanis, &y[0][k]);
 		H.x -= Hanis.x;
@@ -268,6 +307,7 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 		H.y -= thermY;
 		H.z -= thermZ;
 		#endif
+		*/
 	}
 
 	free(dv);
