@@ -347,7 +347,7 @@ int main(int argc, char *argv[]) {
 	endTime = (1e9)*strtof(argv[1], NULL); //In ns
 	nstep = ((int)ceil(endTime/TIMESTEP));
 
-	nstep = ((nstep + 500) / 1000) * 1000 //round nstep to the nearest thousand
+	nstep = ((nstep + 500) / 1000) * 1000; //round nstep to the nearest thousand
 
 	if((nstep % 1000) == 0) nstep /= 1000; //Divide by 1000 to reduce host memory usage
 	else {
