@@ -1,4 +1,4 @@
-#define USE_THERMAL 1 //Simulate random thermal motion 
+#define USE_THERMAL 1 //Simulate random thermal motion. 1 enables, 0 disables 
 
 #define HEIGHT 4 //Atoms in y direction
 #define WIDTH 4 //Atoms in x direction
