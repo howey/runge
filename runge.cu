@@ -3,9 +3,10 @@
 #include <math.h>
 #include <stdbool.h>
 #include <curand_kernel.h>
+#include <time.h>
 #include "vector.h"
 #include "runge.h"
-#include "mars.h"
+//#include "mars.h"
 
 
 /* Time is in units of ns */
@@ -167,7 +168,7 @@ void anisotropyH(Vector * Ha, const SphVector * M) {
 */
 
 //Computes the local applied field for every atom of moment M. The global applied field is passed in as H. 
-__global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar) {
+__global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, unsigned long long seed) {
 	//Thread coordinates
 	int tx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
 	int ty = blockIdx.y * BLOCK_SIZE + threadIdx.y;
@@ -178,7 +179,7 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar) {
 
 	//initialize RNG
 	//TODO: this should probably get a real seed
-	curand_init(1234, i, 0, &state);
+	curand_init(seed, i, 0, &state);
 
 	if(i < nvar) {
 		//the applied field
@@ -282,7 +283,7 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 		cudaMemcpy(v_d, v, sizeof(SphVector) * nvar, cudaMemcpyHostToDevice);
 
 		//Launch kernel to compute H field
-		computeField<<<gridDim, blockDim>>>(H_d, H, v_d, nvar);	
+		computeField<<<gridDim, blockDim>>>(H_d, H, v_d, nvar, (unsigned long long)time(NULL));	
 
 		//Launch kernel to compute derivatives
 		(*derivs)<<<ceil(nvar/512.0), 512>>>(x, v_d, dv_d, nvar, H_d);
