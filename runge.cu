@@ -22,6 +22,7 @@ static double *xx;
 static SphVector **y;
 static Vector H;
 static Vector *H_d;
+static SphVector *yout_d;
 
 __global__ void rk4First(SphVector *yt_d, SphVector *y_d, SphVector * dydx_d, double hh, int n) {
 	//TODO: Use shared memory
@@ -75,7 +76,8 @@ void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVect
 	//SphVector *dym, *dyt, *yt;
 
 	//device arrays
-	SphVector *dym_d, *dyt_d, *yt_d, *yout_d;
+	//SphVector *dym_d, *dyt_d, *yt_d, *yout_d;
+	SphVector *dym_d, *dyt_d, *yt_d;
 
 	/*
 	dym = (SphVector *)malloc(sizeof(SphVector) * n);
@@ -87,7 +89,7 @@ void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVect
 	cudaMalloc((void **)&dym_d, sizeof(SphVector) * n);
 	cudaMalloc((void **)&dyt_d, sizeof(SphVector) * n);
 	cudaMalloc((void **)&yt_d, sizeof(SphVector) * n);
-	cudaMalloc((void **)&yout_d, sizeof(SphVector) * n);
+	//cudaMalloc((void **)&yout_d, sizeof(SphVector) * n);
 
 	hh = h * 0.5;
 	h6 = h / 6.0;
@@ -155,7 +157,7 @@ void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVect
 	cudaFree(yt_d);
 	cudaFree(dyt_d);
 	cudaFree(dym_d);
-	cudaFree(yout_d);
+	//cudaFree(yout_d);
 }
 
 /*
@@ -240,6 +242,8 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	vout = (SphVector *)malloc(sizeof(SphVector) * nvar);
 	dv = (SphVector *)malloc(sizeof(SphVector) * nvar);
 
+	cudaMalloc((void **)&yout_d, sizeof(SphVector) * nvar);
+
 	//allocate device memory for mDot
 	cudaMalloc((void **)&v_d, sizeof(SphVector) * nvar);
 	cudaMalloc((void **)&dv_d, sizeof(SphVector) * nvar);
@@ -279,8 +283,9 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 		*/
 
 		//Copy memory to device
-		//TODO: this could probably be eliminated by keeping v_d from the previous step on the device
-		cudaMemcpy(v_d, v, sizeof(SphVector) * nvar, cudaMemcpyHostToDevice);
+		//After the first timestep, the value of v and yout_d are the same. d2d memcpy is much faster than h2s, so do it instead
+		if(k == 0) cudaMemcpy(v_d, v, sizeof(SphVector) * nvar, cudaMemcpyHostToDevice);
+		else cudaMemcpy(v_d, yout_d, sizeof(SphVector) * nvar, cudaMemcpyDeviceToDevice);
 
 		//Launch kernel to compute H field
 		computeField<<<gridDim, blockDim>>>(H_d, H, v_d, nvar, (unsigned long long)time(NULL));	
@@ -316,6 +321,7 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	free(dv);
 	free(vout);
 	free(v);
+	cudaFree(yout_d);
 }
 
 int main(int argc, char *argv[]) {
@@ -336,7 +342,7 @@ int main(int argc, char *argv[]) {
 		vstart[i].phi = 0;
 	}
 
-	Vector Happl = {0.0, 0.0, 5000.0};
+	Vector Happl = {10.0, 10.0, 5000.0};
 
 	//Get the step size for the simulation 
 	if(argc < 2) {
