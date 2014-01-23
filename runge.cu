@@ -342,7 +342,7 @@ int main(int argc, char *argv[]) {
 		vstart[i].phi = 0;
 	}
 
-	Vector Happl = {10.0, 10.0, 5000.0};
+	Vector Happl = {20.0, 20.0, 5000.0};
 
 	//Get the step size for the simulation 
 	if(argc < 2) {
@@ -379,7 +379,7 @@ int main(int argc, char *argv[]) {
 
 		for(int j = 0; j < 1000; j++) {
 			//Simulate!
-			rkdumb(vstart, nvar, 0.0, endTime, nstep, mDot); 
+			rkdumb(vstart, nvar, j * endTime / 1000, j* endTime / 1000 + endTime - endTime/nstep, nstep, mDot); 
 
 			for(int i = 0; i < nvar; i++) {
 				vstart[i].r = y[i][nstep].r;
