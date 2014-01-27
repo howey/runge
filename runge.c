@@ -204,8 +204,8 @@ int main(int argc, char *argv[]) {
 	}
 
 	bool isDecreasing = true;
-	Happl.x = 20.0;
-	Happl.y = 20.0;
+	Happl.x = 0.0;
+	Happl.y = 0.0;
 	Happl.z = 5000.0;
 
 	for(int i = 0; i <= 400; i++) {
