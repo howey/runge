@@ -1,13 +1,5 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <math.h>
-#include <stdbool.h>
 #include <curand_kernel.h>
-#include <time.h>
-#include "vector.h"
 #include "runge.h"
-//#include "mars.h"
-
 
 /* Time is in units of ns */
 static const double ALPHA = 0.02; 

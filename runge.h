@@ -34,4 +34,4 @@ typedef struct {
 
 double nextDouble(double, double);
 double nextGaussian();
-void mDot(double, SphVector[], SphVector[], int, Vector[]);
+//void mDot(double, SphVector[], SphVector[], int, Vector[]);
