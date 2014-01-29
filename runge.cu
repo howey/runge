@@ -344,6 +344,9 @@ int main(int argc, char *argv[]) {
 
 	//TODO: there has to be a better way of handling input
 	endTime = (1e9)*strtof(argv[1], NULL); //In ns
+	
+	endTime /= 100; //Reduce memory usage
+
 	nstep = ((int)ceil(endTime/TIMESTEP));
 
 	xx = (double *)malloc(sizeof(double) * (nstep + 1));
@@ -361,13 +364,15 @@ int main(int argc, char *argv[]) {
 		H.y = Happl.y;
 		H.z = Happl.z;
 
-		//Simulate!
-		rkdumb(vstart, nvar, 0.0, endTime, nstep, mDot); 
+		for(int j = 0; j < 100; j++) {
+			//Simulate!
+			rkdumb(vstart, nvar, endTime * j, endTime * (j + 1) - TIMESTEP, nstep, mDot); 
 
-		for(int i = 0; i < nvar; i++) {
-			vstart[i].r = y[i][nstep].r;
-			vstart[i].theta = y[i][nstep].theta;
-			vstart[i].phi = y[i][nstep].phi;
+			for(int i = 0; i < nvar; i++) {
+				vstart[i].r = y[i][nstep].r;
+				vstart[i].theta = y[i][nstep].theta;
+				vstart[i].phi = y[i][nstep].phi;
+			}
 		}
 
 		for(int k = 0; k < nvar; k++) {
