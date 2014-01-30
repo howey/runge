@@ -257,9 +257,13 @@ int main(int argc, char *argv[]) {
 			}
 		}
 
+		double mag = 0.0;
 		for(int k = 0; k < nvar; k++) {
-			fprintf(output, "%f\t%f\n", Happl.z, (y[k][nstep].r)*cos(y[k][nstep].theta));
+			//fprintf(output, "%f\t%f\n", Happl.z, (y[k][nstep].r)*cos(y[k][nstep].theta));
+			mag += (y[k][nstep].r)*cos(y[k][nstep].theta);
 		}
+		mag /= (double)nvar;
+		fprintf(output, "%f\t%f\n", Happl.z, mag);
 
 		//Adjust applied field strength at endTime intervals	
 		if(Happl.z + 5000.0 < 1.0) isDecreasing = false;
