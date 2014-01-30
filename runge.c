@@ -90,7 +90,7 @@ void computeField(Vector * H, Vector Happl, const SphVector * M, int nvar) {
 		H[i].z += (1/M[i].r) * 2 * KANIS * cos(M[i].theta) * sin(M[i].theta) * sin(M[i].theta);
 
 		//the field from random thermal motion
-		//TODO: sd doesn't have to be computed each time, it is constant
+		//TODO: compute sd for arbitrary temperature and volume, do not hardcode
 		#if USE_THERMAL
 		double sd = 3.4e-4/sqrt(TIMESTEP * 1e-9);
 		double thermX = gaussian(0, sd); 
@@ -102,7 +102,42 @@ void computeField(Vector * H, Vector Happl, const SphVector * M, int nvar) {
 		H[i].z += thermZ;
 		#endif
 
-		//TODO: the exchange field
+		//the exchange field
+		SphVector up, down, left, right, front, back;
+
+		if(i % (WIDTH * HEIGHT) < WIDTH)
+			up = M[i + WIDTH * (HEIGHT - 1)]; 
+		else
+			up = M[i - WIDTH];
+
+		if(i % (WIDTH * HEIGHT) > (WIDTH * (HEIGHT - 1) - 1))
+			down = M[i - WIDTH * (HEIGHT - 1)];
+		else
+			down = M[i + WIDTH];	
+
+		if(i % WIDTH == 0)
+			left = M[i + (WIDTH - 1)];
+		else
+			left = M[i - 1];
+
+		if((i + 1) % WIDTH == 0)
+			right = M[i - (WIDTH - 1)];
+		else
+			right = M[i + 1];
+
+		if(i < (WIDTH * HEIGHT))
+			front = M[i + (WIDTH * HEIGHT * (DEPTH - 1))];
+		else
+			front = M[i - (WIDTH * HEIGHT)];
+
+		if(i > (WIDTH * HEIGHT * (DEPTH - 1)))
+			back = M[i - (WIDTH * HEIGHT * (DEPTH - 1))];
+		else
+			back = M[i + (WIDTH * HEIGHT)];
+		
+		H[i].x += JEX * (sin(up.theta) * cos(up.phi) + sin(down.theta) * cos(down.phi) + sin(left.theta) * cos(left.phi) + sin(right.theta) * cos(right.phi) + sin(front.theta) * cos(front.phi) + sin(back.theta) * cos(back.phi));
+		H[i].y += JEX * (sin(up.theta) * sin(up.phi) + sin(down.theta) * sin(down.phi) + sin(left.theta) * sin(left.phi) + sin(right.theta) * sin(right.phi) + sin(front.theta) * sin(front.phi) + sin(back.theta) * sin(back.phi)); 
+		H[i].z += JEX * (cos(up.phi) + cos(down.phi) + cos(left.phi) + cos(right.phi) + cos(front.phi) + cos(back.phi));
 	}
 }
 
