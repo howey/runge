@@ -65,23 +65,14 @@ supplies the routine derivs(x,y,dydx) , which returns derivatives dydx at x .
 */
 void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVector yout[], void (*derivs)(double, SphVector[], SphVector[], int, Vector[])) {
 	double xh, hh, h6; 
-	//SphVector *dym, *dyt, *yt;
 
 	//device arrays
-	//SphVector *dym_d, *dyt_d, *yt_d, *yout_d;
 	SphVector *dym_d, *dyt_d, *yt_d;
-
-	/*
-	dym = (SphVector *)malloc(sizeof(SphVector) * n);
-	dyt = (SphVector *)malloc(sizeof(SphVector) * n);
-	yt = (SphVector *)malloc(sizeof(SphVector) * n);
-	*/
 
 	//allocate device arrays
 	cudaMalloc((void **)&dym_d, sizeof(SphVector) * n);
 	cudaMalloc((void **)&dyt_d, sizeof(SphVector) * n);
 	cudaMalloc((void **)&yt_d, sizeof(SphVector) * n);
-	//cudaMalloc((void **)&yout_d, sizeof(SphVector) * n);
 
 	hh = h * 0.5;
 	h6 = h / 6.0;
@@ -89,77 +80,29 @@ void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVect
 
 	//First step
 	rk4First<<<ceil(n/512.0), 512>>>(yt_d, y_d, dydx_d, hh, n);
-	/*
-	for (int i = 0; i < n; i++) {
-		//yt[i] = y[i] + hh * dydx[i];
-		yt[i].r = y[i].r + hh * dydx[i].r;
-		yt[i].phi = y[i].phi + hh * dydx[i].phi;
-		yt[i].theta = y[i].theta + hh * dydx[i].theta;
-	}
-	*/
+
 	//Second step
 	(*derivs)<<<ceil(n/512.0), 512>>>(xh, yt_d, dyt_d, n, H_d);
 	rk4Second<<<ceil(n/512.0), 512>>>(yt_d, y_d, dyt_d, hh, n);
-	/*
-	for (int i = 0; i < n; i++) {
-		//yt[i] = y[i] + hh * dyt[i];
-		yt[i].r = y[i].r + hh * dyt[i].r;
-		yt[i].phi = y[i].phi + hh * dyt[i].phi;
-		yt[i].theta = y[i].theta + hh * dyt[i].theta;
-	}
-	*/
+
 	//Third step
 	(*derivs)<<<ceil(n/512.0), 512>>>(xh, yt_d, dym_d, n, H_d);
 	rk4Third<<<ceil(n/512.0), 512>>>(yt_d, y_d, dym_d, dyt_d, h, n);
-	/*
-	for (int i = 0; i < n; i++) {
-		//yt[i] = y[i] + h * dym[i];
-		//dym[i] += dyt[i];
-		yt[i].r = y[i].r + h * dym[i].r;
-		dym[i].r += dyt[i].r;
-		yt[i].phi = y[i].phi + h * dym[i].phi;
-		dym[i].phi += dyt[i].phi;
-		yt[i].theta = y[i].theta + h * dym[i].theta;
-		dym[i].theta += dyt[i].theta;
-	}
-	*/
+
 	//Fourth step
 	(*derivs)<<<ceil(n/512.0), 512>>>(x + h, yt_d, dyt_d, n, H_d);
 	//Accumulate increments with proper weights
 	rk4Fourth<<<ceil(n/512.0), 512>>>(yout_d, y_d, dydx_d, dyt_d, dym_d, h6, n);
-	/*
-	for (int i = 0; i < n; i++) {
-		//yout[i] = y[i] + h6 * (dydx[i] + dyt[i] + 2.0 * dym[i]);
-		yout[i].r = y[i].r + h6 * (dydx[i].r + dyt[i].r + 2.0 * dym[i].r);
-		yout[i].phi = y[i].phi + h6 * (dydx[i].phi + dyt[i].phi + 2.0 * dym[i].phi);
-		yout[i].theta = y[i].theta + h6 * (dydx[i].theta + dyt[i].theta + 2.0 * dym[i].theta);
-	}
-	*/
 
 	//Copy yout to host
 	cudaMemcpy(yout, yout_d, sizeof(SphVector) * n, cudaMemcpyDeviceToHost);
 	
-	/*
-	free(yt);
-	free(dyt);
-	free(dym);
-	*/
-
 	//Free device arrays
 	cudaFree(yt_d);
 	cudaFree(dyt_d);
 	cudaFree(dym_d);
 	//cudaFree(yout_d);
 }
-
-/*
-//Computes the anisotropy field and writes the result to a Vector H
-void anisotropyH(Vector * Ha, const SphVector * M) {
-	Ha->x = (1/M->r) * -2 * KANIS * cos(M->theta) * sin(M->theta) * cos(M->phi) * cos(M->theta);
-	Ha->y = (1/M->r) * -2 * KANIS * cos(M->theta) * sin(M->theta) * sin(M->phi) * cos(M->theta);
-	Ha->z = (1/M->r) * 2 * KANIS * cos(M->theta) * sin(M->theta) * sin(M->theta);
-}
-*/
 
 //Computes the local applied field for every atom of moment M. The global applied field is passed in as H. 
 __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, unsigned long long seed) {
@@ -263,7 +206,6 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 
 	//device arrays
 	SphVector *v_d, *dv_d;
-	//Vector Hanis = {0.0, 0.0, 0.0};
 
 	v = (SphVector *)malloc(sizeof(SphVector) * nvar);
 	vout = (SphVector *)malloc(sizeof(SphVector) * nvar);
@@ -290,27 +232,6 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	double sd = 3.4e-4/sqrt(TIMESTEP * 1e-9);
 	for (int k = 0; k < nstep; k++) {
 
-		/*
-		// Add in thermal motion
-		#if USE_THERMAL 
-		double thermX = gaussian(0, sd);
-		double thermY = gaussian(0, sd);
-		double thermZ = gaussian(0, sd);
-		#endif
-
-		//Add in anisotropy
-		anisotropyH(&Hanis, &y[0][k]);
-		H.x += Hanis.x;
-		H.y += Hanis.y;
-		H.z += Hanis.z;
-
-		#if USE_THERMAL
-		H.x += thermX;
-		H.y += thermY;
-		H.z += thermZ;
-		#endif
-		*/
-
 		//Copy memory to device
 		//After the first timestep, the value of v and yout_d are the same. d2d memcpy is much faster than h2s, so do it instead
 		if(k == 0) cudaMemcpy(v_d, v, sizeof(SphVector) * nvar, cudaMemcpyHostToDevice);
@@ -331,20 +252,6 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 			y[i][k + 1] = v[i];
 		}
 
-		/*
-		//Remove anisotropy for next step 
-		anisotropyH(&Hanis, &y[0][k]);
-		H.x -= Hanis.x;
-		H.y -= Hanis.y;
-		H.z -= Hanis.z;
-
-		#if USE_THERMAL
-		//Remove thermal motion
-		H.x -= thermX;
-		H.y -= thermY;
-		H.z -= thermZ;
-		#endif
-		*/
 	}
 
 	free(dv);
@@ -379,7 +286,6 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
-	//TODO: there has to be a better way of handling input
 	endTime = (1e9)*strtof(argv[1], NULL); //In ns
 	
 	endTime /= 100; //Reduce memory usage
@@ -387,7 +293,6 @@ int main(int argc, char *argv[]) {
 	nstep = ((int)ceil(endTime/TIMESTEP));
 
 	xx = (double *)malloc(sizeof(double) * (nstep + 1));
-	//TODO: Address y row-major
 	y = (SphVector **)malloc(sizeof(SphVector *) * nvar); 
 	for(int i = 0; i < nvar; i++) {
 		y[i] = (SphVector *)malloc(sizeof(SphVector) * (nstep + 1));
