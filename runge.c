@@ -5,9 +5,11 @@ static const double ALPHA = 0.02;
 static const double GAMMA = 1.76e-2;
 static const double KANIS = 1e6;
 static const double TIMESTEP = (1e-5);
-static const double MSAT = 500;
-
-static const double JEX = 1;
+static const double MSAT = 500.0;
+static const double JEX = 1.0;
+static const double VOL = 1.58e-18;
+static const double TEMP = 300.0;
+static const double BOLTZ = 1.38e-34;
 
 static double *xx;
 static SphVector **y;
@@ -90,9 +92,8 @@ void computeField(Vector * H, Vector Happl, const SphVector * M, int nvar) {
 		H[i].z += (1/M[i].r) * 2 * KANIS * cos(M[i].theta) * sin(M[i].theta) * sin(M[i].theta);
 
 		//the field from random thermal motion
-		//TODO: compute sd for arbitrary temperature and volume, do not hardcode
 		#if USE_THERMAL
-		double sd = 3.4e-4/sqrt(TIMESTEP * 1e-9);
+		double sd = (1e9) * sqrt((2 * BOLTZ * TEMP * ALPHA)/(GAMMA * VOL * MSAT * TIMESTEP)); //time has units of s here
 		double thermX = gaussian(0, sd); 
 		double thermY = gaussian(0, sd); 
 		double thermZ = gaussian(0, sd); 
