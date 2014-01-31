@@ -169,7 +169,7 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, un
 	int tz = blockIdx.z * BLOCK_SIZE + threadIdx.z;
 	int i = tz * WIDTH * HEIGHT +  ty * WIDTH + tx;
 	
-	curandState_t state;
+	curandStateXORWOW_t state;
 
 	//initialize RNG
 	//TODO: this should probably get a real seed
@@ -199,7 +199,42 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, un
 		H_d[i].z += thermZ;
 		#endif
 
-		//TODO: the exchange field
+		//the exchange field
+		SphVector up, down, left, right, front, back;
+
+		if(i % (WIDTH * HEIGHT) < WIDTH)
+			up = M[i + WIDTH * (HEIGHT - 1)]; 
+		else
+			up = M[i - WIDTH];
+
+		if(i % (WIDTH * HEIGHT) > (WIDTH * (HEIGHT - 1) - 1))
+			down = M[i - WIDTH * (HEIGHT - 1)];
+		else
+			down = M[i + WIDTH];	
+
+		if(i % WIDTH == 0)
+			left = M[i + (WIDTH - 1)];
+		else
+			left = M[i - 1];
+
+		if((i + 1) % WIDTH == 0)
+			right = M[i - (WIDTH - 1)];
+		else
+			right = M[i + 1];
+
+		if(i < (WIDTH * HEIGHT))
+			front = M[i + (WIDTH * HEIGHT * (DEPTH - 1))];
+		else
+			front = M[i - (WIDTH * HEIGHT)];
+
+		if(i > (WIDTH * HEIGHT * (DEPTH - 1)))
+			back = M[i - (WIDTH * HEIGHT * (DEPTH - 1))];
+		else
+			back = M[i + (WIDTH * HEIGHT)];
+
+		H[i].x += JEX * (sin(up.theta) * cos(up.phi) + sin(down.theta) * cos(down.phi) + sin(left.theta) * cos(left.phi) + sin(right.theta) * cos(right.phi) + sin(front.theta) * cos(front.phi) + sin(back.theta) * cos(back.phi));
+		H[i].y += JEX * (sin(up.theta) * sin(up.phi) + sin(down.theta) * sin(down.phi) + sin(left.theta) * sin(left.phi) + sin(right.theta) * sin(right.phi) + sin(front.theta) * sin(front.phi) + sin(back.theta) * sin(back.phi)); 
+		H[i].z += JEX * (cos(up.phi) + cos(down.phi) + cos(left.phi) + cos(right.phi) + cos(front.phi) + cos(back.phi));
 	}
 }
 
@@ -250,6 +285,8 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	x = x1;
 	h = (x2-x1)/nstep;
 
+	unsigned long long seed = time(NULL);
+
 	double sd = 3.4e-4/sqrt(TIMESTEP * 1e-9);
 	for (int k = 0; k < nstep; k++) {
 
@@ -280,7 +317,7 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 		else cudaMemcpy(v_d, yout_d, sizeof(SphVector) * nvar, cudaMemcpyDeviceToDevice);
 
 		//Launch kernel to compute H field
-		computeField<<<gridDim, blockDim>>>(H_d, H, v_d, nvar, (unsigned long long)time(NULL));	
+		computeField<<<gridDim, blockDim>>>(H_d, H, v_d, nvar, seed); 
 
 		//Launch kernel to compute derivatives
 		(*derivs)<<<ceil(nvar/512.0), 512>>>(x, v_d, dv_d, nvar, H_d);
@@ -334,7 +371,7 @@ int main(int argc, char *argv[]) {
 		vstart[i].phi = 0;
 	}
 
-	Vector Happl = {20.0, 20.0, 5000.0};
+	Vector Happl = {0.0, 0.0, 5000.0};
 
 	//Get the step size for the simulation 
 	if(argc < 2) {
@@ -374,10 +411,14 @@ int main(int argc, char *argv[]) {
 				vstart[i].phi = y[i][nstep].phi;
 			}
 		}
-
+	
+		double mag = 0.0;	
 		for(int k = 0; k < nvar; k++) {
-			fprintf(output, "%f\t%f\n", Happl.z, (y[k][nstep].r)*cos(y[k][nstep].theta));
+			mag += (y[k][nstep].r)*cos(y[k][nstep].theta);
+			//fprintf(output, "%f\t%f\n", Happl.z, (y[k][nstep].r)*cos(y[k][nstep].theta));
 		}
+		mag /= (double)nvar;
+		fprintf(output, "%f\t%f\n", Happl.z, mag);
 
 		//Adjust applied field strength at endTime intervals	
 		if(Happl.z + 5000.0 < 1.0) isDecreasing = false;
