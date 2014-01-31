@@ -6,9 +6,11 @@ static const double ALPHA = 0.02;
 static const double GAMMA = 1.76e-2;
 static const double KANIS = 1e6;
 static const double TIMESTEP = (1e-5);
-static const double MSAT = 500;
-
-static const double JEX = 1;
+static const double MSAT = 500.0;
+static const double JEX = 1.0;
+static const double VOL = 1.58e-18;
+static const double TEMP = 300.0;
+static const double BOLTZ = 1.38e-34;
 
 static double *xx;
 static SphVector **y;
@@ -132,7 +134,7 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, un
 		//the field from random thermal motion
 		//TODO: sd doesn't have to be computed each time, it is constant
 		#if USE_THERMAL
-		double sd = 3.4e-4/sqrt(TIMESTEP * 1e-9);
+		double sd = (1e9) * sqrt((2 * BOLTZ * TEMP * ALPHA)/(GAMMA * VOL * MSAT * TIMESTEP)); //time has units of s here
 		double thermX = sd * curand_normal_double(&state); 
 		double thermY = sd * curand_normal_double(&state);
 		double thermZ = sd * curand_normal_double(&state);
