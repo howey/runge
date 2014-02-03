@@ -7,7 +7,7 @@ static const double KANIS = 1e6;
 static const double TIMESTEP = (1e-5);
 static const double MSAT = 500.0;
 static const double JEX = 1.0;
-static const double VOL = 1.41e-23;
+static const double VOL = 2.7e-23;
 static const double TEMP = 300.0;
 static const double BOLTZ = 1.38e-34;
 
