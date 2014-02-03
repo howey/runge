@@ -17,7 +17,16 @@ static SphVector **y;
 static Vector H;
 static Vector *H_d;
 static SphVector *yout_d;
+static curandStateXORWOW_t *state;
 
+__global__ void initializeRandom(curandStateXORWOW_t * state, int nvar, unsigned long long seed) {
+	//the thread id
+	int i = threadIdx.x + blockDim.x * blockIdx.x;
+
+	//initialize RNG
+	if(i < nvar)
+		curand_init(seed, i, 0, &state[i]);
+}
 __global__ void rk4First(SphVector *yt_d, SphVector *y_d, SphVector * dydx_d, double hh, int n) {
 	//TODO: Use shared memory
 	int i = threadIdx.x + blockIdx.x * blockDim.x;
@@ -107,19 +116,13 @@ void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVect
 }
 
 //Computes the local applied field for every atom of moment M. The global applied field is passed in as H. 
-__global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, unsigned long long seed) {
+__global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, curandStateXORWOW_t * state) {
 	//Thread coordinates
 	int tx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
 	int ty = blockIdx.y * BLOCK_SIZE + threadIdx.y;
 	int tz = blockIdx.z * BLOCK_SIZE + threadIdx.z;
 	int i = tz * WIDTH * HEIGHT +  ty * WIDTH + tx;
 	
-	curandStateXORWOW_t state;
-
-	//initialize RNG
-	//TODO: this should probably get a real seed
-	curand_init(seed, i, 0, &state);
-
 	if(i < nvar) {
 		//the applied field
 		H_d[i].x = H.x;
@@ -132,12 +135,12 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, un
 		H_d[i].z += (1/M[i].r) * 2 * KANIS * cos(M[i].theta) * sin(M[i].theta) * sin(M[i].theta);
 
 		//the field from random thermal motion
-		//TODO: sd doesn't have to be computed each time, it is constant
+		//TODO: sd doesn't hve to be computed each time, it is constant
 		#if USE_THERMAL
 		double sd = (1e9) * sqrt((2 * BOLTZ * TEMP * ALPHA)/(GAMMA * VOL * MSAT * TIMESTEP)); //time has units of s here
-		double thermX = sd * curand_normal_double(&state); 
-		double thermY = sd * curand_normal_double(&state);
-		double thermZ = sd * curand_normal_double(&state);
+		double thermX = sd * curand_normal_double(&state[i]); 
+		double thermY = sd * curand_normal_double(&state[i]);
+		double thermZ = sd * curand_normal_double(&state[i]);
 
 		H_d[i].x += thermX;
 		H_d[i].y += thermY;
@@ -229,9 +232,6 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	x = x1;
 	h = (x2-x1)/nstep;
 
-	unsigned long long seed = time(NULL);
-
-	double sd = 3.4e-4/sqrt(TIMESTEP * 1e-9);
 	for (int k = 0; k < nstep; k++) {
 
 		//Copy memory to device
@@ -268,6 +268,11 @@ int main(int argc, char *argv[]) {
 	double endTime;
 	SphVector vstart[nvar]; 
 	FILE * output = fopen("output.txt", "w");
+	
+	//Initialize random number generator
+	unsigned long long seed = time(NULL);
+	cudaMalloc((void **)&state, sizeof(curandStateXORWOW_t) * nvar);
+	initializeRandom<<<ceil(nvar/512.0), 512>>>(state, nvar, seed);
 
 	if(output == NULL) {
 		printf("error opening file\n");
@@ -334,5 +339,6 @@ int main(int argc, char *argv[]) {
 	//Probably don't really need these since we're about to exit the program
 	free(xx);
 	free(y);
+	cudaFree(state);
 	return 0;
 }
