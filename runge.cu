@@ -240,7 +240,7 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 		else cudaMemcpy(v_d, yout_d, sizeof(SphVector) * nvar, cudaMemcpyDeviceToDevice);
 
 		//Launch kernel to compute H field
-		computeField<<<gridDim, blockDim>>>(H_d, H, v_d, nvar, seed); 
+		computeField<<<gridDim, blockDim>>>(H_d, H, v_d, nvar, state); 
 
 		//Launch kernel to compute derivatives
 		(*derivs)<<<ceil(nvar/512.0), 512>>>(x, v_d, dv_d, nvar, H_d);
