@@ -175,7 +175,7 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, cu
 		else
 			front = M[i - (WIDTH * HEIGHT)];
 
-		if(i > (WIDTH * HEIGHT * (DEPTH - 1)))
+		if(i >= (WIDTH * HEIGHT * (DEPTH - 1)))
 			back = M[i - (WIDTH * HEIGHT * (DEPTH - 1))];
 		else
 			back = M[i + (WIDTH * HEIGHT)];
