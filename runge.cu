@@ -260,6 +260,9 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	free(vout);
 	free(v);
 	cudaFree(yout_d);
+	cudaFree(v_d);
+	cudaFree(dv_d);
+	cudaFree(H_d);
 }
 
 int main(int argc, char *argv[]) {
