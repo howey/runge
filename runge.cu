@@ -182,7 +182,7 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, cu
 
 		H_d[i].x += JEX * (sin(up.theta) * cos(up.phi) + sin(down.theta) * cos(down.phi) + sin(left.theta) * cos(left.phi) + sin(right.theta) * cos(right.phi) + sin(front.theta) * cos(front.phi) + sin(back.theta) * cos(back.phi));
 		H_d[i].y += JEX * (sin(up.theta) * sin(up.phi) + sin(down.theta) * sin(down.phi) + sin(left.theta) * sin(left.phi) + sin(right.theta) * sin(right.phi) + sin(front.theta) * sin(front.phi) + sin(back.theta) * sin(back.phi)); 
-		H_d[i].z += JEX * (cos(up.phi) + cos(down.phi) + cos(left.phi) + cos(right.phi) + cos(front.phi) + cos(back.phi));
+		H_d[i].z += JEX * (cos(up.theta) + cos(down.theta) + cos(left.theta) + cos(right.theta) + cos(front.theta) + cos(back.theta));
 	}
 }
 
