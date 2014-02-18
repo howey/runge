@@ -1,15 +1,15 @@
 #include "runge.h"
 
 /* Time is in units of ns */
-static const double ALPHA = 0.02; 
-static const double GAMMA = 1.76e-2;
-static const double KANIS = 1e6;
-static const double TIMESTEP = (1e-5);
-static const double MSAT = 500.0;
-static const double JEX = 1.0;
-static const double VOL = 2.7e-23;
-static const double TEMP = 300.0;
-static const double BOLTZ = 1.38e-34;
+static const double ALPHA = 0.02; //Dimensionless
+static const double GAMMA = 1.76e-2; //(Oe*ns)^-1
+static const double KANIS = 7.0e7; //erg*cm^-3
+static const double TIMESTEP = (1e-5); //ns
+static const double MSAT = 1100.0; //emu*cm^-3
+static const double JEX = 1.1e-6; //erg*cm^-1
+static const double ALEN = 3e-8; //cm
+static const double TEMP = 300.0; //K
+static const double BOLTZ = 1.38e-34; //g*cm^2*ns^-2*K^-1
 
 static double *xx;
 static SphVector **y;
@@ -92,8 +92,9 @@ void computeField(Vector * H, Vector Happl, const SphVector * M, int nvar) {
 		H[i].z += (1/M[i].r) * 2 * KANIS * cos(M[i].theta) * sin(M[i].theta) * sin(M[i].theta);
 
 		//the field from random thermal motion
-		#if USE_THERMAL
-		double sd = (1e9) * sqrt((2 * BOLTZ * TEMP * ALPHA)/(GAMMA * VOL * MSAT * TIMESTEP)); //time has units of s here
+		double vol = ALEN * ALEN * ALEN;
+		double sd = (1e9) * sqrt((2 * BOLTZ * TEMP * ALPHA)/(GAMMA * vol * MSAT * TIMESTEP)); //time has units of s here
+
 		double thermX = gaussian(0, sd); 
 		double thermY = gaussian(0, sd); 
 		double thermZ = gaussian(0, sd); 
@@ -101,7 +102,6 @@ void computeField(Vector * H, Vector Happl, const SphVector * M, int nvar) {
 		H[i].x += thermX;
 		H[i].y += thermY;
 		H[i].z += thermZ;
-		#endif
 
 		//the exchange field
 		SphVector up, down, left, right, front, back;
@@ -136,9 +136,11 @@ void computeField(Vector * H, Vector Happl, const SphVector * M, int nvar) {
 		else
 			back = M[i + (WIDTH * HEIGHT)];
 		
-		H[i].x += JEX * (sin(up.theta) * cos(up.phi) + sin(down.theta) * cos(down.phi) + sin(left.theta) * cos(left.phi) + sin(right.theta) * cos(right.phi) + sin(front.theta) * cos(front.phi) + sin(back.theta) * cos(back.phi));
-		H[i].y += JEX * (sin(up.theta) * sin(up.phi) + sin(down.theta) * sin(down.phi) + sin(left.theta) * sin(left.phi) + sin(right.theta) * sin(right.phi) + sin(front.theta) * sin(front.phi) + sin(back.theta) * sin(back.phi)); 
-		H[i].z += JEX * (cos(up.theta) + cos(down.theta) + cos(left.theta) + cos(right.theta) + cos(front.theta) + cos(back.theta));
+		double Hex = JEX / (MSAT * ALEN * ALEN);
+
+		H[i].x += Hex * (sin(up.theta) * cos(up.phi) + sin(down.theta) * cos(down.phi) + sin(left.theta) * cos(left.phi) + sin(right.theta) * cos(right.phi) + sin(front.theta) * cos(front.phi) + sin(back.theta) * cos(back.phi));
+		H[i].y += Hex * (sin(up.theta) * sin(up.phi) + sin(down.theta) * sin(down.phi) + sin(left.theta) * sin(left.phi) + sin(right.theta) * sin(right.phi) + sin(front.theta) * sin(front.phi) + sin(back.theta) * sin(back.phi)); 
+		H[i].z += Hex * (cos(up.theta) + cos(down.theta) + cos(left.theta) + cos(right.theta) + cos(front.theta) + cos(back.theta));
 	}
 }
 
