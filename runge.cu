@@ -2,15 +2,15 @@
 #include "runge.h"
 
 /* Time is in units of ns */
-static const double ALPHA = 0.02; 
-static const double GAMMA = 1.76e-2;
-static const double KANIS = 1e6;
-static const double TIMESTEP = (1e-5);
-static const double MSAT = 500.0;
-static const double JEX = 1;
-static const double VOL = 2.7e-23;
-static const double TEMP = 300.0;
-static const double BOLTZ = 1.38e-34;
+static const double ALPHA = 0.02; //Dimensionless
+static const double GAMMA = 1.76e-2; //(Oe*ns)^-1
+static const double KANIS = 7.0e7; //erg*cm^-3
+static const double TIMESTEP = (1e-5); //ns
+static const double MSAT = 1100.0; //emu*cm^-3
+static const double JEX = 1.1e-6; //erg*cm^-1
+static const double ALEN = 3e-8; //cm
+static const double TEMP = 300.0; //K
+static const double BOLTZ = 1.38e-34; //g*cm^2*ns^-2*K^-1
 
 static double *xx;
 static SphVector **y;
@@ -117,27 +117,36 @@ void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVect
 
 //Computes the local applied field for every atom of moment M. The global applied field is passed in as H. 
 __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, curandStateXORWOW_t * state) {
+	/* Declare shared memory for CUDA block.
+	   Since a halo element neighbors only one atom,
+	   halo elements are not loaded into shared memory.
+	   Instead, they are read from global memory as usual. */
+	__shared__ SphVector M_s[BLOCK_SIZE][BLOCK_SIZE][BLOCK_SIZE];
+
 	//Thread coordinates
 	int tx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
 	int ty = blockIdx.y * BLOCK_SIZE + threadIdx.y;
 	int tz = blockIdx.z * BLOCK_SIZE + threadIdx.z;
 	int i = tz * WIDTH * HEIGHT +  ty * WIDTH + tx;
-	
-	if(i < nvar) {
+
+	if(tx < WIDTH && ty < HEIGHT && tz < DEPTH) {
+		//Load block into shared memory
+		M_s[threadIdx.z][threadIdx.y][threadIdx.x] = M[i];
+
 		//the applied field
 		H_d[i].x = H.x;
 		H_d[i].y = H.y;
 		H_d[i].z = H.z;
 
 		//the anisotropy field
-		H_d[i].x += (1/M[i].r) * -2 * KANIS * cos(M[i].theta) * sin(M[i].theta) * cos(M[i].phi) * cos(M[i].theta);
-		H_d[i].y += (1/M[i].r) * -2 * KANIS * cos(M[i].theta) * sin(M[i].theta) * sin(M[i].phi) * cos(M[i].theta);
-		H_d[i].z += (1/M[i].r) * 2 * KANIS * cos(M[i].theta) * sin(M[i].theta) * sin(M[i].theta);
+		H_d[i].x += (1/M_s[threadIdx.z][threadIdx.y][threadIdx.x].r) * -2 * KANIS * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].phi) * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta);
+		H_d[i].y += (1/M_s[threadIdx.z][threadIdx.y][threadIdx.x].r) * -2 * KANIS * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].phi) * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta);
+		H_d[i].z += (1/M_s[threadIdx.z][threadIdx.y][threadIdx.x].r) * 2 * KANIS * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta);
 
 		//the field from random thermal motion
-		//TODO: sd doesn't hve to be computed each time, it is constant
-		#if USE_THERMAL
-		double sd = (1e9) * sqrt((2 * BOLTZ * TEMP * ALPHA)/(GAMMA * VOL * MSAT * TIMESTEP)); //time has units of s here
+		double vol = ALEN * ALEN * ALEN;
+		double sd = (1e9) * sqrt((2 * BOLTZ * TEMP * ALPHA)/(GAMMA * vol * MSAT * TIMESTEP)); //time has units of s here
+
 		double thermX = sd * curand_normal_double(&state[i]); 
 		double thermY = sd * curand_normal_double(&state[i]);
 		double thermZ = sd * curand_normal_double(&state[i]);
@@ -145,7 +154,7 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, cu
 		H_d[i].x += thermX;
 		H_d[i].y += thermY;
 		H_d[i].z += thermZ;
-		#endif
+
 
 		//the exchange field
 		SphVector up, down, left, right, front, back;
@@ -180,9 +189,11 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, cu
 		else
 			back = M[i + (WIDTH * HEIGHT)];
 
-		H_d[i].x += JEX * (sin(up.theta) * cos(up.phi) + sin(down.theta) * cos(down.phi) + sin(left.theta) * cos(left.phi) + sin(right.theta) * cos(right.phi) + sin(front.theta) * cos(front.phi) + sin(back.theta) * cos(back.phi));
-		H_d[i].y += JEX * (sin(up.theta) * sin(up.phi) + sin(down.theta) * sin(down.phi) + sin(left.theta) * sin(left.phi) + sin(right.theta) * sin(right.phi) + sin(front.theta) * sin(front.phi) + sin(back.theta) * sin(back.phi)); 
-		H_d[i].z += JEX * (cos(up.theta) + cos(down.theta) + cos(left.theta) + cos(right.theta) + cos(front.theta) + cos(back.theta));
+		double Hex = JEX / (MSAT * ALEN * ALEN);
+
+		H_d[i].x += Hex * (sin(up.theta) * cos(up.phi) + sin(down.theta) * cos(down.phi) + sin(left.theta) * cos(left.phi) + sin(right.theta) * cos(right.phi) + sin(front.theta) * cos(front.phi) + sin(back.theta) * cos(back.phi));
+		H_d[i].y += Hex * (sin(up.theta) * sin(up.phi) + sin(down.theta) * sin(down.phi) + sin(left.theta) * sin(left.phi) + sin(right.theta) * sin(right.phi) + sin(front.theta) * sin(front.phi) + sin(back.theta) * sin(back.phi)); 
+		H_d[i].z += Hex * (cos(up.theta) + cos(down.theta) + cos(left.theta) + cos(right.theta) + cos(front.theta) + cos(back.theta));
 	}
 }
 
