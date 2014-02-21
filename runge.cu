@@ -5,7 +5,7 @@
 static const double ALPHA = 0.02; //Dimensionless
 static const double GAMMA = 1.76e-2; //(Oe*ns)^-1
 static const double KANIS = 7.0e7; //erg*cm^-3
-static const double TIMESTEP = (1e-5); //ns
+static const double TIMESTEP = (1e-7); //ns
 static const double MSAT = 1100.0; //emu*cm^-3
 static const double JEX = 1.1e-6; //erg*cm^-1
 static const double ALEN = 3e-8; //cm
