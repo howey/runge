@@ -74,7 +74,7 @@ fourth-order Runge-Kutta method to advance the solution over an interval h and r
 incremented variables as yout[1..n] , which need not be a distinct array from y . The user
 supplies the routine derivs(x,y,dydx) , which returns derivatives dydx at x .
 */
-void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVector yout[], void (*derivs)(double, SphVector[], SphVector[], int, Vector[])) {
+void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVector yout[], void (*derivs)(double, SphVector[], SphVector[], int, Vector[]), bool CopyToHost) {
 	double xh, hh, h6; 
 
 	//device arrays
@@ -106,7 +106,8 @@ void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVect
 	rk4Fourth<<<ceil(n/512.0), 512>>>(yout_d, y_d, dydx_d, dyt_d, dym_d, h6, n);
 
 	//Copy yout to host
-	cudaMemcpy(yout, yout_d, sizeof(SphVector) * n, cudaMemcpyDeviceToHost);
+	if(CopyToHost)
+		cudaMemcpy(yout, yout_d, sizeof(SphVector) * n, cudaMemcpyDeviceToHost);
 	
 	//Free device arrays
 	cudaFree(yt_d);
@@ -159,33 +160,51 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, cu
 		//the exchange field
 		SphVector up, down, left, right, front, back;
 
-		if(i % (WIDTH * HEIGHT) < WIDTH)
+		//if(i % (WIDTH * HEIGHT) < WIDTH) //if at top of particle
+		if(ty == (HEIGHT - 1))
 			up = M[i + WIDTH * (HEIGHT - 1)]; 
+		else if(threadIdx.y < (blockDim.y - 1))
+			up = M_s[threadIdx.z][threadIdx.y + 1][threadIdx.x];
 		else
 			up = M[i - WIDTH];
 
-		if(i % (WIDTH * HEIGHT) > (WIDTH * (HEIGHT - 1) - 1))
+		//if(i % (WIDTH * HEIGHT) > (WIDTH * (HEIGHT - 1) - 1)) //if at bottom of particle
+		if(ty == 0)
 			down = M[i - WIDTH * (HEIGHT - 1)];
+		else if(threadIdx.y > 0)
+			down = M_s[threadIdx.z][threadIdx.y - 1][threadIdx.x];
 		else
 			down = M[i + WIDTH];	
 
-		if(i % WIDTH == 0)
-			left = M[i + (WIDTH - 1)];
+		//if(i % WIDTH == 0) //if at left
+		if(tx == 0)
+			left = M[i + (WIDTH - 1)]; 
+		else if(threadIdx.x > 0)
+			left = M_s[threadIdx.z][threadIdx.y][threadIdx.x - 1];
 		else
 			left = M[i - 1];
 
-		if((i + 1) % WIDTH == 0)
+		//if((i + 1) % WIDTH == 0) //if at right
+		if(tx == (WIDTH - 1))
 			right = M[i - (WIDTH - 1)];
+		else if(threadIdx.x < (blockDim.x - 1))
+			right = M_s[threadIdx.z][threadIdx.y][threadIdx.x + 1];
 		else
 			right = M[i + 1];
 
-		if(i < (WIDTH * HEIGHT))
+		//if(i < (WIDTH * HEIGHT)) //if at front
+		if(tz == 0)
 			front = M[i + (WIDTH * HEIGHT * (DEPTH - 1))];
+		else if(threadIdx.z > 0)
+			front = M_s[threadIdx.z - 1][threadIdx.y][threadIdx.x];
 		else
 			front = M[i - (WIDTH * HEIGHT)];
 
-		if(i >= (WIDTH * HEIGHT * (DEPTH - 1)))
+		//if(i >= (WIDTH * HEIGHT * (DEPTH - 1))) //if at rear
+		if(tz == (DEPTH - 1))
 			back = M[i - (WIDTH * HEIGHT * (DEPTH - 1))];
+		else if(threadIdx.z < (blockDim.z - 1))
+			back = M_s[threadIdx.z + 1][threadIdx.y][threadIdx.x];
 		else
 			back = M[i + (WIDTH * HEIGHT)];
 
@@ -248,15 +267,23 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 		//Copy memory to device
 		//After the first timestep, the value of v and yout_d are the same. d2d memcpy is much faster than h2s, so do it instead
 		if(k == 0) cudaMemcpy(v_d, v, sizeof(SphVector) * nvar, cudaMemcpyHostToDevice);
-		else cudaMemcpy(v_d, yout_d, sizeof(SphVector) * nvar, cudaMemcpyDeviceToDevice);
+		//else cudaMemcpy(v_d, yout_d, sizeof(SphVector) * nvar, cudaMemcpyDeviceToDevice);
+		else {
+			SphVector *t_d = v_d;
+			v_d = yout_d;
+			yout_d = t_d;
+		}
 
 		//Launch kernel to compute H field
 		computeField<<<gridDim, blockDim>>>(H_d, H, v_d, nvar, state); 
 
 		//Launch kernel to compute derivatives
 		(*derivs)<<<ceil(nvar/512.0), 512>>>(x, v_d, dv_d, nvar, H_d);
-		
-		rk4(v_d,dv_d,nvar,x,h,vout,derivs);
+	
+		bool CopyToHost = (k == (nstep - 1));
+
+		//rk4(v_d,dv_d,nvar,x,h,vout,derivs);
+		rk4(v_d,dv_d,nvar,x,h,vout,derivs, CopyToHost);
 		if ((double)(x + h) == x) fprintf(stderr, "Step size too small in routine rkdumb");
 		x += h;
 		xx[k + 1] = x;
