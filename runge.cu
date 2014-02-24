@@ -163,16 +163,16 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, cu
 		//if(i % (WIDTH * HEIGHT) < WIDTH) //if at top of particle
 		if(ty == (HEIGHT - 1))
 			up = M[i + WIDTH * (HEIGHT - 1)]; 
-		else if(threadIdx.y < (blockDim.y - 1))
-			up = M_s[threadIdx.z][threadIdx.y + 1][threadIdx.x];
+		else if(threadIdx.y > 0)
+			up = M_s[threadIdx.z][threadIdx.y - 1][threadIdx.x];
 		else
 			up = M[i - WIDTH];
 
 		//if(i % (WIDTH * HEIGHT) > (WIDTH * (HEIGHT - 1) - 1)) //if at bottom of particle
 		if(ty == 0)
 			down = M[i - WIDTH * (HEIGHT - 1)];
-		else if(threadIdx.y > 0)
-			down = M_s[threadIdx.z][threadIdx.y - 1][threadIdx.x];
+		else if(threadIdx.y < (blockDim.y - 1))
+			down = M_s[threadIdx.z][threadIdx.y + 1][threadIdx.x];
 		else
 			down = M[i + WIDTH];	
 
