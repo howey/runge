@@ -9,7 +9,7 @@ static const double TIMESTEP = (1e-7); //ns
 static const double MSAT = 1100.0; //emu*cm^-3
 static const double JEX = 1.1e-6; //erg*cm^-1
 static const double ALEN = 3e-8; //cm
-static const double TEMP = 300.0; //K
+static const double TEMP = 0.1; //K
 static const double BOLTZ = 1.38e-34; //g*cm^2*ns^-2*K^-1
 
 static double *xx;
@@ -161,7 +161,7 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, cu
 		SphVector up, down, left, right, front, back;
 
 		//if(i % (WIDTH * HEIGHT) < WIDTH) //if at top of particle
-		if(ty == (HEIGHT - 1))
+		if(ty == 0)
 			up = M[i + WIDTH * (HEIGHT - 1)]; 
 		else if(threadIdx.y > 0)
 			up = M_s[threadIdx.z][threadIdx.y - 1][threadIdx.x];
@@ -169,7 +169,7 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, cu
 			up = M[i - WIDTH];
 
 		//if(i % (WIDTH * HEIGHT) > (WIDTH * (HEIGHT - 1) - 1)) //if at bottom of particle
-		if(ty == 0)
+		if(ty == (HEIGHT - 1))
 			down = M[i - WIDTH * (HEIGHT - 1)];
 		else if(threadIdx.y < (blockDim.y - 1))
 			down = M_s[threadIdx.z][threadIdx.y + 1][threadIdx.x];
