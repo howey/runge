@@ -1,10 +1,8 @@
-#define USE_THERMAL 0 //Simulate random thermal motion. 1 enables, 0 disables 
+#define HEIGHT 20 //Atoms in y direction
+#define WIDTH 20 //Atoms in x direction
+#define DEPTH 20 //Atoms in z direction
 
-#define HEIGHT 2 //Atoms in y direction
-#define WIDTH 2 //Atoms in x direction
-#define DEPTH 2 //Atoms in z direction
-
-#define BLOCK_SIZE 4 //Side length of CUDA block
+#define BLOCK_SIZE 8 //Side length of CUDA block
 
 #define gaussian(mean, sd) ((mean) + (sd) * nextGaussian())
 
