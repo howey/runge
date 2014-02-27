@@ -2,15 +2,18 @@
 #include "runge.h"
 
 /* Time is in units of ns */
-static const double ALPHA = 0.02; //Dimensionless
+static const double ALPHA = 0.02; //dimensionless
 static const double GAMMA = 1.76e-2; //(Oe*ns)^-1
 static const double KANIS = 7.0e7; //erg*cm^-3
-static const double TIMESTEP = (1e-7); //ns
+static const double TIMESTEP = (1e-7); //ns, the integrator timestep
 static const double MSAT = 1100.0; //emu*cm^-3
 static const double JEX = 1.1e-6; //erg*cm^-1
 static const double ALEN = 3e-8; //cm
-static const double TEMP = 0.1; //K
+static const double TEMP = 300.0; //K
 static const double BOLTZ = 1.38e-34; //g*cm^2*ns^-2*K^-1
+static const double FIELDSTEP = 500.0; //Oe, the change in the applied field
+static const double FIELDTIMESTEP = 0.1; //ns, time to wait before changing applied field
+static const double FIELDRANGE = 130000.0; //Oe, create loop from FIELDRANGE to -FIELDRANGE Oe
 
 static double *xx;
 static SphVector **y;
@@ -329,18 +332,9 @@ int main(int argc, char *argv[]) {
 		vstart[i].phi = 0;
 	}
 
-	Vector Happl = {0.0, 0.0, 5000.0};
-
-	//Get the step size for the simulation 
-	if(argc < 2) {
-		printf("Usage: %s [step size]\n", argv[0]);
-		return 1;
-	}
-
-	endTime = (1e9)*strtof(argv[1], NULL); //In ns
-	
-	endTime /= 100; //Reduce memory usage
-
+	Vector Happl = {0.0, 0.0, FIELDRANGE};
+	endTime = FIELDTIMESTEP; 
+	endTime /= 100; //Reduce host memory usage
 	nstep = ((int)ceil(endTime/TIMESTEP));
 
 	xx = (double *)malloc(sizeof(double) * (nstep + 1));
@@ -351,7 +345,7 @@ int main(int argc, char *argv[]) {
 
 	
 	bool isDecreasing = true;
-	for(int i = 0; i <= 400; i++) {
+	for(int i = 0; i <= (4 * (int)(FIELDRANGE/FIELDSTEP)); i++) {
 		//Applied field
 		H.x = Happl.x;
 		H.y = Happl.y;
@@ -371,14 +365,15 @@ int main(int argc, char *argv[]) {
 		double mag = 0.0;	
 		for(int k = 0; k < nvar; k++) {
 			mag += (y[k][nstep].r)*cos(y[k][nstep].theta);
-			//fprintf(output, "%f\t%f\n", Happl.z, (y[k][nstep].r)*cos(y[k][nstep].theta));
 		}
+
 		mag /= (double)nvar;
 		fprintf(output, "%f\t%f\n", Happl.z, mag);
+		fflush(output);
 
 		//Adjust applied field strength at endTime intervals	
-		if(Happl.z + 5000.0 < 1.0) isDecreasing = false;
-		isDecreasing ? (Happl.z -= 50.0) : (Happl.z += 50.0);
+		if(Happl.z + FIELDRANGE < 1.0) isDecreasing = false;
+		isDecreasing ? (Happl.z -= FIELDSTEP) : (Happl.z += FIELDSTEP);
 	}
 	//Probably don't really need these since we're about to exit the program
 	free(xx);
