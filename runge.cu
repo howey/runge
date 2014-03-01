@@ -19,7 +19,6 @@ static double *xx;
 static SphVector **y;
 static Vector H;
 static Vector *H_d;
-static SphVector *yout_d;
 static curandStateXORWOW_t *state;
 
 __global__ void initializeRandom(curandStateXORWOW_t * state, int nvar, unsigned long long seed) {
@@ -70,6 +69,73 @@ __global__ void rk4Fourth(SphVector *yout_d, SphVector *y_d, SphVector *dydx_d, 
 	}
 }
 
+__global__ void rk4Kernel(SphVector * y_d, SphVector * dydx_d, int n, double x, double h, SphVector * yout_d, Vector * H) {
+	//device arrays
+	__shared__ SphVector dym_d[VECTOR_SIZE];
+	__shared__ SphVector dyt_d[VECTOR_SIZE];
+	__shared__ SphVector yt_d[VECTOR_SIZE];
+	__shared__ Vector H_s[VECTOR_SIZE];
+	__shared__ SphVector y_s[VECTOR_SIZE];
+
+	double hh, h6;
+	int i = threadIdx.x + blockIdx.x * blockDim.x;
+	int tx = threadIdx.x;
+
+
+	hh = h * 0.5;
+	h6 = h / 6.0;
+
+	//Load field into shared memory
+	if(i < n) {
+		H_s[tx] = H[i];
+	}
+
+	//Load input into shared memory
+	if(i < n) {
+		y_s[tx] = y_d[i];
+	}
+
+	//First step
+	if(i < n) {
+		yt_d[tx].r = y_s[tx].r + hh * dydx_d[i].r;
+		yt_d[tx].phi = y_s[tx].phi + hh * dydx_d[i].phi;
+		yt_d[tx].theta = y_s[tx].theta + hh * dydx_d[i].theta;
+	}
+
+	//Second step
+	dyt_d[tx].r = 0;
+	dyt_d[tx].phi = GAMMA * ((cos(yt_d[tx].theta) * sin(yt_d[tx].phi) * H_s[tx].y) / sin(yt_d[tx].theta) + (cos(yt_d[tx].theta) * cos(yt_d[tx].phi) * H_s[tx].x) / sin(yt_d[tx].theta) - H_s[tx].z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(yt_d[tx].phi) * H_s[tx].y) / sin(yt_d[tx].theta) - (sin(yt_d[tx].phi) * H_s[tx].x) / sin(yt_d[tx].theta));
+	dyt_d[tx].theta = -GAMMA * (cos(yt_d[tx].phi) * H_s[tx].y - sin(yt_d[tx].phi) * H_s[tx].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(yt_d[tx].theta) * cos(yt_d[tx].phi) * H_s[tx].x - H_s[tx].z * sin(yt_d[tx].theta) + cos(yt_d[tx].theta) * sin(yt_d[tx].phi) * H_s[tx].y);
+
+	yt_d[tx].r = y_s[tx].r + hh * dyt_d[tx].r;
+	yt_d[tx].phi = y_s[tx].phi + hh * dyt_d[tx].phi;
+	yt_d[tx].theta = y_s[tx].theta + hh * dyt_d[tx].theta;
+
+	//Third step
+	dym_d[tx].r = 0;
+	dym_d[tx].phi = GAMMA * ((cos(yt_d[tx].theta) * sin(yt_d[tx].phi) * H_s[tx].y) / sin(yt_d[tx].theta) + (cos(yt_d[tx].theta) * cos(yt_d[tx].phi) * H_s[tx].x) / sin(yt_d[tx].theta) - H_s[tx].z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(yt_d[tx].phi) * H_s[tx].y) / sin(yt_d[tx].theta) - (sin(yt_d[tx].phi) * H_s[tx].x) / sin(yt_d[tx].theta));
+	dym_d[tx].theta = -GAMMA * (cos(yt_d[tx].phi) * H_s[tx].y - sin(yt_d[tx].phi) * H_s[tx].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(yt_d[tx].theta) * cos(yt_d[tx].phi) * H_s[tx].x - H_s[tx].z * sin(yt_d[tx].theta) + cos(yt_d[tx].theta) * sin(yt_d[tx].phi) * H_s[tx].y);
+
+	yt_d[tx].r = y_s[tx].r + h * dym_d[tx].r;
+	dym_d[tx].r += dyt_d[tx].r;
+	yt_d[tx].phi = y_s[tx].phi + h * dym_d[tx].phi;
+	dym_d[tx].phi += dyt_d[tx].phi;
+	yt_d[tx].theta = y_s[tx].theta + h * dym_d[tx].theta;
+	dym_d[tx].theta += dyt_d[tx].theta;
+
+	//Fourth step
+	dyt_d[tx].r = 0;
+	dyt_d[tx].phi = GAMMA * ((cos(yt_d[tx].theta) * sin(yt_d[tx].phi) * H_s[tx].y) / sin(yt_d[tx].theta) + (cos(yt_d[tx].theta) * cos(yt_d[tx].phi) * H_s[tx].x) / sin(yt_d[tx].theta) - H_s[tx].z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(yt_d[tx].phi) * H_s[tx].y) / sin(yt_d[tx].theta) - (sin(yt_d[tx].phi) * H_s[tx].x) / sin(yt_d[tx].theta));
+	dyt_d[tx].theta = -GAMMA * (cos(yt_d[tx].phi) * H_s[tx].y - sin(yt_d[tx].phi) * H_s[tx].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(yt_d[tx].theta) * cos(yt_d[tx].phi) * H_s[tx].x - H_s[tx].z * sin(yt_d[tx].theta) + cos(yt_d[tx].theta) * sin(yt_d[tx].phi) * H_s[tx].y);
+
+	if(i < n) {
+		yout_d[i].r = y_s[tx].r + h6 * (dydx_d[i].r + dyt_d[tx].r + 2.0 * dym_d[tx].r);
+		yout_d[i].phi = y_s[tx].phi + h6 * (dydx_d[i].phi + dyt_d[tx].phi + 2.0 * dym_d[tx].phi);
+		yout_d[i].theta = y_s[tx].theta + h6 * (dydx_d[i].theta + dyt_d[tx].theta + 2.0 * dym_d[tx].theta);
+	}
+}
+
+#if 0
 //Shamelessly copied from Numerical Recipes
 /*
 Given values for the variables y[1..n] and their derivatives dydx[1..n] known at x , use the
@@ -118,6 +184,7 @@ void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVect
 	cudaFree(dym_d);
 	//cudaFree(yout_d);
 }
+#endif
 
 //Computes the local applied field for every atom of moment M. The global applied field is passed in as H. 
 __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, curandStateXORWOW_t * state) {
@@ -246,7 +313,7 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	SphVector *v, *vout, *dv;
 
 	//device arrays
-	SphVector *v_d, *dv_d;
+	SphVector *v_d, *dv_d, *yout_d;
 
 	v = (SphVector *)malloc(sizeof(SphVector) * nvar);
 	vout = (SphVector *)malloc(sizeof(SphVector) * nvar);
@@ -273,7 +340,6 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 		//Copy memory to device
 		//After the first timestep, the value of v and yout_d are the same. d2d memcpy is much faster than h2s, so do it instead
 		if(k == 0) cudaMemcpy(v_d, v, sizeof(SphVector) * nvar, cudaMemcpyHostToDevice);
-		//else cudaMemcpy(v_d, yout_d, sizeof(SphVector) * nvar, cudaMemcpyDeviceToDevice);
 		else {
 			SphVector *t_d = v_d;
 			v_d = yout_d;
@@ -286,11 +352,18 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 		//Launch kernel to compute derivatives
 		(*derivs)<<<ceil(nvar/512.0), 512>>>(x, v_d, dv_d, nvar, H_d);
 	
-		bool CopyToHost = (k == (nstep - 1));
+		//bool CopyToHost = (k == (nstep - 1));
 
 		//rk4(v_d,dv_d,nvar,x,h,vout,derivs);
-		rk4(v_d,dv_d,nvar,x,h,vout,derivs, CopyToHost);
-		if ((double)(x + h) == x) fprintf(stderr, "Step size too small in routine rkdumb");
+		//rk4(v_d,dv_d,nvar,x,h,vout,derivs, CopyToHost);
+		rk4Kernel<<<ceil(nvar/VECTOR_SIZE), VECTOR_SIZE>>>(v_d, dv_d, nvar, x, h, yout_d, H_d);
+		
+		if(k == (nstep - 1))
+			cudaMemcpy(vout, yout_d, sizeof(SphVector) * nvar, cudaMemcpyDeviceToHost);
+
+		if ((double)(x + h) == x) 
+			fprintf(stderr, "Step size too small in routine rkdumb");
+
 		x += h;
 		xx[k + 1] = x;
 		for (int i = 0; i < nvar; i++) {
@@ -334,7 +407,9 @@ int main(int argc, char *argv[]) {
 	unsigned long long seed = time(NULL);
 	cudaMalloc((void **)&state, sizeof(curandStateXORWOW_t) * nvar);
 	initializeRandom<<<ceil(nvar/512.0), 512>>>(state, nvar, seed);
-
+	
+	//Configure shared/L1 as 48KB/16KB
+	cudaDeviceSetCacheConfig(cudaFuncCachePreferShared);
 	
 	for(int i = 0; i < nvar; i++) {	
 		vstart[i].r = MSAT;
