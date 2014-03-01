@@ -4,6 +4,8 @@
 
 #define BLOCK_SIZE 8 //Side length of CUDA block
 
+#define BENCHMARK 1 //Time the simulation
+
 #define gaussian(mean, sd) ((mean) + (sd) * nextGaussian())
 
 #include <time.h>

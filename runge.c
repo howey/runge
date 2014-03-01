@@ -210,13 +210,22 @@ int main(int argc, char *argv[]) {
 	int nstep;
 	double endTime;
 	SphVector vstart[nvar]; 
-	FILE * output = fopen("output.txt", "w");
 
+	FILE * output = fopen("output.txt", "w");
 	if(output == NULL) {
 		printf("error opening file\n");
-		return 0;
+		return 1;
 	}
 	
+	#if BENCHMARK
+	FILE * times = fopen("times.txt", "w");
+	if(times == NULL) {
+		printf("error opening file: times.txt\n");
+		return 1;
+	}
+	fprintf(times, "Time to simulate %fns\n");
+	#endif
+
 	//seed random number generator
 	srand(time(NULL));
 
@@ -239,6 +248,10 @@ int main(int argc, char *argv[]) {
 	
 	bool isDecreasing = true;
 	for(int i = 0; i <= (4 * (int)(FIELDRANGE/FIELDSTEP)); i++) {
+		#if BENCHMARK
+		time_t start = time(NULL);
+		#endif
+
 		for(int j = 0; j < 100; j++) {
 			//Simulate!
 			rkdumb(vstart, nvar, endTime * j, endTime * (j + 1) - TIMESTEP, nstep, mDot); 
@@ -249,6 +262,12 @@ int main(int argc, char *argv[]) {
 				vstart[i].phi = y[i][nstep].phi;
 			}
 		}
+
+		#if BENCHMARK
+		time_t end = time(NULL);
+		fprintf(times, "%lds\n", (long)(end - start));
+		fflush(times);
+		#endif
 	
 		double mag = 0.0;	
 		for(int k = 0; k < nvar; k++) {
