@@ -29,45 +29,6 @@ __global__ void initializeRandom(curandStateXORWOW_t * state, int nvar, unsigned
 	if(i < nvar)
 		curand_init(seed, i, 0, &state[i]);
 }
-__global__ void rk4First(SphVector *yt_d, SphVector *y_d, SphVector * dydx_d, double hh, int n) {
-	//TODO: Use shared memory
-	int i = threadIdx.x + blockIdx.x * blockDim.x;
-	if(i < n) {
-		yt_d[i].r = y_d[i].r + hh * dydx_d[i].r;
-		yt_d[i].phi = y_d[i].phi + hh * dydx_d[i].phi;
-		yt_d[i].theta = y_d[i].theta + hh * dydx_d[i].theta;
-	}
-}
-
-__global__ void rk4Second(SphVector *yt_d, SphVector *y_d, SphVector *dyt_d, double hh, int n) {
-	int i = threadIdx.x + blockIdx.x * blockDim.x;
-	if(i < n) {
-		yt_d[i].r = y_d[i].r + hh * dyt_d[i].r;
-		yt_d[i].phi = y_d[i].phi + hh * dyt_d[i].phi;
-		yt_d[i].theta = y_d[i].theta + hh * dyt_d[i].theta;
-	}
-}
-
-__global__ void rk4Third(SphVector *yt_d, SphVector *y_d, SphVector *dym_d, SphVector * dyt_d, double h, int n) {
-	int i = threadIdx.x + blockIdx.x * blockDim.x;
-	if(i < n) {
-		yt_d[i].r = y_d[i].r + h * dym_d[i].r;
-		dym_d[i].r += dyt_d[i].r;
-		yt_d[i].phi = y_d[i].phi + h * dym_d[i].phi;
-		dym_d[i].phi += dyt_d[i].phi;
-		yt_d[i].theta = y_d[i].theta + h * dym_d[i].theta;
-		dym_d[i].theta += dyt_d[i].theta;
-	}
-}
-
-__global__ void rk4Fourth(SphVector *yout_d, SphVector *y_d, SphVector *dydx_d, SphVector *dyt_d, SphVector *dym_d, double h6, int n) {
-	int i = threadIdx.x + blockIdx.x * blockDim.x;
-	if(i < n) {
-		yout_d[i].r = y_d[i].r + h6 * (dydx_d[i].r + dyt_d[i].r + 2.0 * dym_d[i].r);
-		yout_d[i].phi = y_d[i].phi + h6 * (dydx_d[i].phi + dyt_d[i].phi + 2.0 * dym_d[i].phi);
-		yout_d[i].theta = y_d[i].theta + h6 * (dydx_d[i].theta + dyt_d[i].theta + 2.0 * dym_d[i].theta);
-	}
-}
 
 __global__ void rk4Kernel(SphVector * y_d, SphVector * dydx_d, int n, double x, double h, SphVector * yout_d, Vector * H) {
 	//device arrays
