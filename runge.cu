@@ -9,7 +9,7 @@ static const double TIMESTEP = (1e-7); //ns, the integrator timestep
 static const double MSAT = 1100.0; //emu*cm^-3
 static const double JEX = 1.1e-6; //erg*cm^-1
 static const double ALEN = 3e-8; //cm
-static const double TEMP = 300.0; //K
+static const double TEMP = 0.0; //K
 static const double BOLTZ = 1.38e-34; //g*cm^2*ns^-2*K^-1
 static const double FIELDSTEP = 500.0; //Oe, the change in the applied field
 static const double FIELDTIMESTEP = 0.1; //ns, time to wait before changing applied field
@@ -37,6 +37,7 @@ __global__ void rk4Kernel(SphVector * y_d, SphVector * dydx_d, int n, double x, 
 	__shared__ SphVector yt_d[VECTOR_SIZE];
 	__shared__ Vector H_s[VECTOR_SIZE];
 	__shared__ SphVector y_s[VECTOR_SIZE];
+	__shared__ SphVector dydx_s[VECTOR_SIZE];
 
 	double hh, h6;
 	int i = threadIdx.x + blockIdx.x * blockDim.x;
@@ -57,11 +58,13 @@ __global__ void rk4Kernel(SphVector * y_d, SphVector * dydx_d, int n, double x, 
 	}
 
 	//First step
-	if(i < n) {
-		yt_d[tx].r = y_s[tx].r + hh * dydx_d[i].r;
-		yt_d[tx].phi = y_s[tx].phi + hh * dydx_d[i].phi;
-		yt_d[tx].theta = y_s[tx].theta + hh * dydx_d[i].theta;
-	}
+	dydx_s[tx].r = 0;
+	dydx_s[tx].phi = GAMMA * ((cos(y_s[tx].theta) * sin(y_s[tx].phi) * H_s[tx].y) / sin(y_s[tx].theta) + (cos(y_s[tx].theta) * cos(y_s[tx].phi) * H_s[tx].x) / sin(y_s[tx].theta) - H_s[tx].z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(y_s[tx].phi) * H_s[tx].y) / sin(y_s[tx].theta) - (sin(y_s[tx].phi) * H_s[tx].x) / sin(y_s[tx].theta));
+	dydx_s[tx].theta = -GAMMA * (cos(y_s[tx].phi) * H_s[tx].y - sin(y_s[tx].phi) * H_s[tx].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(y_s[tx].theta) * cos(y_s[tx].phi) * H_s[tx].x - H_s[tx].z * sin(y_s[tx].theta) + cos(y_s[tx].theta) * sin(y_s[tx].phi) * H_s[tx].y);
+
+	yt_d[tx].r = y_s[tx].r + hh * dydx_s[tx].r;
+	yt_d[tx].phi = y_s[tx].phi + hh * dydx_s[tx].phi;
+	yt_d[tx].theta = y_s[tx].theta + hh * dydx_s[tx].theta;
 
 	//Second step
 	dyt_d[tx].r = 0;
@@ -259,9 +262,6 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 		//Launch kernel to compute H field
 		computeField<<<gridDim, blockDim>>>(H_d, H, v_d, nvar, state); 
 
-		//Launch kernel to compute derivatives
-		(*derivs)<<<ceil(nvar/512.0), 512>>>(x, v_d, dv_d, nvar, H_d);
-	
 		rk4Kernel<<<ceil(nvar/VECTOR_SIZE), VECTOR_SIZE>>>(v_d, dv_d, nvar, x, h, yout_d, H_d);
 		
 		if(k == (nstep - 1))
