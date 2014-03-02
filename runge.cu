@@ -306,7 +306,7 @@ int main(int argc, char *argv[]) {
 		printf("error opening file: times.txt\n");
 		return 1;
 	}
-	fprintf(times, "Time to simulate %fns\n, FIELDTIMESTEP");
+	fprintf(times, "Time to simulate %fns\n", FIELDTIMESTEP);
 	#endif
 
 	//Initialize random number generator
