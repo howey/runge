@@ -30,72 +30,158 @@ __global__ void initializeRandom(curandStateXORWOW_t * state, int nvar, unsigned
 		curand_init(seed, i, 0, &state[i]);
 }
 
-__global__ void rk4Kernel(SphVector * y_d, SphVector * dydx_d, int n, double x, double h, SphVector * yout_d, Vector * H) {
-	//device arrays
-	__shared__ SphVector dym_d[VECTOR_SIZE];
-	__shared__ SphVector dyt_d[VECTOR_SIZE];
-	__shared__ SphVector yt_d[VECTOR_SIZE];
-	__shared__ Vector H_s[VECTOR_SIZE];
-	__shared__ SphVector y_s[VECTOR_SIZE];
-	__shared__ SphVector dydx_s[VECTOR_SIZE];
-
+//y_d, a pointer to the state at iteration n
+//H, the global applied field
+__global__ void rk4Kernel(SphVector * y_d, int n, double x, double h, SphVector * yout_d, Vector H, curandStateXORWOW_t * state) {
+	/* Declare shared memory for CUDA block.
+	   Since a halo element neighbors only one atom,
+	   halo elements are not loaded into shared memory.
+	   Instead, they are read from global memory as usual. */
+	__shared__ SphVector dym_d[BLOCK_SIZE][BLOCK_SIZE][BLOCK_SIZE];
+	__shared__ SphVector dyt_d[BLOCK_SIZE][BLOCK_SIZE][BLOCK_SIZE];
+	__shared__ SphVector yt_d[BLOCK_SIZE][BLOCK_SIZE][BLOCK_SIZE];
+	__shared__ Vector H_s[BLOCK_SIZE][BLOCK_SIZE][BLOCK_SIZE];
+	__shared__ SphVector y_s[BLOCK_SIZE][BLOCK_SIZE][BLOCK_SIZE];
+	__shared__ SphVector dydx_s[BLOCK_SIZE][BLOCK_SIZE][BLOCK_SIZE];
+	
 	double hh, h6;
-	int i = threadIdx.x + blockIdx.x * blockDim.x;
-	int tx = threadIdx.x;
+	int ix = threadIdx.x;
+	int iy = threadIdx.y;
+	int iz = threadIdx.z;
+	int tx = blockIdx.x * BLOCK_SIZE + ix;
+	int ty = blockIdx.y * BLOCK_SIZE + iy;
+	int tz = blockIdx.z * BLOCK_SIZE + iz;
+	int i = tz * WIDTH * HEIGHT + ty * WIDTH + tx;
+
+	if(tx < WIDTH && ty < HEIGHT && tz < DEPTH) {
+		//Load block into shared memory
+		y_s[iz][iy][ix] = y_d[i];
+
+		//the applied field
+		H_s[iz][iy][ix].x = H.x;
+		H_s[iz][iy][ix].y = H.y;
+		H_s[iz][iy][ix].z = H.z;
+
+		//the anisotropy field
+		H_s[iz][iy][ix].x += (1/y_s[iz][iy][ix].r) * -2 * KANIS * cos(y_s[iz][iy][ix].theta) * sin(y_s[iz][iy][ix].theta) * cos(y_s[iz][iy][ix].phi) * cos(y_s[iz][iy][ix].theta);
+		H_s[iz][iy][ix].y += (1/y_s[iz][iy][ix].r) * -2 * KANIS * cos(y_s[iz][iy][ix].theta) * sin(y_s[iz][iy][ix].theta) * sin(y_s[iz][iy][ix].phi) * cos(y_s[iz][iy][ix].theta);
+		H_s[iz][iy][ix].z += (1/y_s[iz][iy][ix].r) * 2 * KANIS * cos(y_s[iz][iy][ix].theta) * sin(y_s[iz][iy][ix].theta) * sin(y_s[iz][iy][ix].theta);
+
+		//the field from random thermal motion
+		double vol = ALEN * ALEN * ALEN;
+		double sd = (1e9) * sqrt((2 * BOLTZ * TEMP * ALPHA)/(GAMMA * vol * MSAT * TIMESTEP)); //time has units of s here
+
+		double thermX = sd * curand_normal_double(&state[i]); 
+		double thermY = sd * curand_normal_double(&state[i]);
+		double thermZ = sd * curand_normal_double(&state[i]);
+
+		H_s[iz][iy][ix].x += thermX;
+		H_s[iz][iy][ix].y += thermY;
+		H_s[iz][iy][ix].z += thermZ;
+
+
+		//the exchange field
+		SphVector up, down, left, right, front, back;
+
+		//if(i % (WIDTH * HEIGHT) < WIDTH) //if at top of particle
+		if(ty == 0)
+			up = y_d[i + WIDTH * (HEIGHT - 1)]; 
+		else if(iy > 0)
+			up = y_s[iz][iy - 1][ix];
+		else
+			up = y_d[i - WIDTH];
+
+		//if(i % (WIDTH * HEIGHT) > (WIDTH * (HEIGHT - 1) - 1)) //if at bottom of particle
+		if(ty == (HEIGHT - 1))
+			down = y_d[i - WIDTH * (HEIGHT - 1)];
+		else if(iy < (blockDim.y - 1))
+			down = y_s[iz][iy + 1][ix];
+		else
+			down = y_d[i + WIDTH];	
+
+		//if(i % WIDTH == 0) //if at left
+		if(tx == 0)
+			left = y_d[i + (WIDTH - 1)]; 
+		else if(ix > 0)
+			left = y_s[iz][iy][ix - 1];
+		else
+			left = y_d[i - 1];
+
+		//if((i + 1) % WIDTH == 0) //if at right
+		if(tx == (WIDTH - 1))
+			right = y_d[i - (WIDTH - 1)];
+		else if(ix < (blockDim.x - 1))
+			right = y_s[iz][iy][ix + 1];
+		else
+			right = y_d[i + 1];
+
+		//if(i < (WIDTH * HEIGHT)) //if at front
+		if(tz == 0)
+			front = y_d[i + (WIDTH * HEIGHT * (DEPTH - 1))];
+		else if(iz > 0)
+			front = y_s[iz - 1][iy][ix];
+		else
+			front = y_d[i - (WIDTH * HEIGHT)];
+
+		//if(i >= (WIDTH * HEIGHT * (DEPTH - 1))) //if at rear
+		if(tz == (DEPTH - 1))
+			back = y_d[i - (WIDTH * HEIGHT * (DEPTH - 1))];
+		else if(iz < (blockDim.z - 1))
+			back = y_s[iz + 1][iy][ix];
+		else
+			back = y_d[i + (WIDTH * HEIGHT)];
+
+		double Hex = JEX / (MSAT * ALEN * ALEN);
+
+		H_s[iz][iy][ix].x += Hex * (sin(up.theta) * cos(up.phi) + sin(down.theta) * cos(down.phi) + sin(left.theta) * cos(left.phi) + sin(right.theta) * cos(right.phi) + sin(front.theta) * cos(front.phi) + sin(back.theta) * cos(back.phi));
+		H_s[iz][iy][ix].y += Hex * (sin(up.theta) * sin(up.phi) + sin(down.theta) * sin(down.phi) + sin(left.theta) * sin(left.phi) + sin(right.theta) * sin(right.phi) + sin(front.theta) * sin(front.phi) + sin(back.theta) * sin(back.phi)); 
+		H_s[iz][iy][ix].z += Hex * (cos(up.theta) + cos(down.theta) + cos(left.theta) + cos(right.theta) + cos(front.theta) + cos(back.theta));
+
+	}
 
 
 	hh = h * 0.5;
 	h6 = h / 6.0;
 
-	//Load field into shared memory
-	if(i < n) {
-		H_s[tx] = H[i];
-	}
-
-	//Load input into shared memory
-	if(i < n) {
-		y_s[tx] = y_d[i];
-	}
-
 	//First step
-	dydx_s[tx].r = 0;
-	dydx_s[tx].phi = GAMMA * ((cos(y_s[tx].theta) * sin(y_s[tx].phi) * H_s[tx].y) / sin(y_s[tx].theta) + (cos(y_s[tx].theta) * cos(y_s[tx].phi) * H_s[tx].x) / sin(y_s[tx].theta) - H_s[tx].z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(y_s[tx].phi) * H_s[tx].y) / sin(y_s[tx].theta) - (sin(y_s[tx].phi) * H_s[tx].x) / sin(y_s[tx].theta));
-	dydx_s[tx].theta = -GAMMA * (cos(y_s[tx].phi) * H_s[tx].y - sin(y_s[tx].phi) * H_s[tx].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(y_s[tx].theta) * cos(y_s[tx].phi) * H_s[tx].x - H_s[tx].z * sin(y_s[tx].theta) + cos(y_s[tx].theta) * sin(y_s[tx].phi) * H_s[tx].y);
+	dydx_s[iz][iy][ix].r = 0;
+	dydx_s[iz][iy][ix].phi = GAMMA * ((cos(y_s[iz][iy][ix].theta) * sin(y_s[iz][iy][ix].phi) * H_s[iz][iy][ix].y) / sin(y_s[iz][iy][ix].theta) + (cos(y_s[iz][iy][ix].theta) * cos(y_s[iz][iy][ix].phi) * H_s[iz][iy][ix].x) / sin(y_s[iz][iy][ix].theta) - H_s[iz][iy][ix].z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(y_s[iz][iy][ix].phi) * H_s[iz][iy][ix].y) / sin(y_s[iz][iy][ix].theta) - (sin(y_s[iz][iy][ix].phi) * H_s[iz][iy][ix].x) / sin(y_s[iz][iy][ix].theta));
+	dydx_s[iz][iy][ix].theta = -GAMMA * (cos(y_s[iz][iy][ix].phi) * H_s[iz][iy][ix].y - sin(y_s[iz][iy][ix].phi) * H_s[iz][iy][ix].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(y_s[iz][iy][ix].theta) * cos(y_s[iz][iy][ix].phi) * H_s[iz][iy][ix].x - H_s[iz][iy][ix].z * sin(y_s[iz][iy][ix].theta) + cos(y_s[iz][iy][ix].theta) * sin(y_s[iz][iy][ix].phi) * H_s[iz][iy][ix].y);
 
-	yt_d[tx].r = y_s[tx].r + hh * dydx_s[tx].r;
-	yt_d[tx].phi = y_s[tx].phi + hh * dydx_s[tx].phi;
-	yt_d[tx].theta = y_s[tx].theta + hh * dydx_s[tx].theta;
+	yt_d[iz][iy][ix].r = y_s[iz][iy][ix].r + hh * dydx_s[iz][iy][ix].r;
+	yt_d[iz][iy][ix].phi = y_s[iz][iy][ix].phi + hh * dydx_s[iz][iy][ix].phi;
+	yt_d[iz][iy][ix].theta = y_s[iz][iy][ix].theta + hh * dydx_s[iz][iy][ix].theta;
 
 	//Second step
-	dyt_d[tx].r = 0;
-	dyt_d[tx].phi = GAMMA * ((cos(yt_d[tx].theta) * sin(yt_d[tx].phi) * H_s[tx].y) / sin(yt_d[tx].theta) + (cos(yt_d[tx].theta) * cos(yt_d[tx].phi) * H_s[tx].x) / sin(yt_d[tx].theta) - H_s[tx].z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(yt_d[tx].phi) * H_s[tx].y) / sin(yt_d[tx].theta) - (sin(yt_d[tx].phi) * H_s[tx].x) / sin(yt_d[tx].theta));
-	dyt_d[tx].theta = -GAMMA * (cos(yt_d[tx].phi) * H_s[tx].y - sin(yt_d[tx].phi) * H_s[tx].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(yt_d[tx].theta) * cos(yt_d[tx].phi) * H_s[tx].x - H_s[tx].z * sin(yt_d[tx].theta) + cos(yt_d[tx].theta) * sin(yt_d[tx].phi) * H_s[tx].y);
+	dyt_d[iz][iy][ix].r = 0;
+	dyt_d[iz][iy][ix].phi = GAMMA * ((cos(yt_d[iz][iy][ix].theta) * sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y) / sin(yt_d[iz][iy][ix].theta) + (cos(yt_d[iz][iy][ix].theta) * cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x) / sin(yt_d[iz][iy][ix].theta) - H_s[iz][iy][ix].z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y) / sin(yt_d[iz][iy][ix].theta) - (sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x) / sin(yt_d[iz][iy][ix].theta));
+	dyt_d[iz][iy][ix].theta = -GAMMA * (cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y - sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(yt_d[iz][iy][ix].theta) * cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x - H_s[iz][iy][ix].z * sin(yt_d[iz][iy][ix].theta) + cos(yt_d[iz][iy][ix].theta) * sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y);
 
-	yt_d[tx].r = y_s[tx].r + hh * dyt_d[tx].r;
-	yt_d[tx].phi = y_s[tx].phi + hh * dyt_d[tx].phi;
-	yt_d[tx].theta = y_s[tx].theta + hh * dyt_d[tx].theta;
+	yt_d[iz][iy][ix].r = y_s[iz][iy][ix].r + hh * dyt_d[iz][iy][ix].r;
+	yt_d[iz][iy][ix].phi = y_s[iz][iy][ix].phi + hh * dyt_d[iz][iy][ix].phi;
+	yt_d[iz][iy][ix].theta = y_s[iz][iy][ix].theta + hh * dyt_d[iz][iy][ix].theta;
 
 	//Third step
-	dym_d[tx].r = 0;
-	dym_d[tx].phi = GAMMA * ((cos(yt_d[tx].theta) * sin(yt_d[tx].phi) * H_s[tx].y) / sin(yt_d[tx].theta) + (cos(yt_d[tx].theta) * cos(yt_d[tx].phi) * H_s[tx].x) / sin(yt_d[tx].theta) - H_s[tx].z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(yt_d[tx].phi) * H_s[tx].y) / sin(yt_d[tx].theta) - (sin(yt_d[tx].phi) * H_s[tx].x) / sin(yt_d[tx].theta));
-	dym_d[tx].theta = -GAMMA * (cos(yt_d[tx].phi) * H_s[tx].y - sin(yt_d[tx].phi) * H_s[tx].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(yt_d[tx].theta) * cos(yt_d[tx].phi) * H_s[tx].x - H_s[tx].z * sin(yt_d[tx].theta) + cos(yt_d[tx].theta) * sin(yt_d[tx].phi) * H_s[tx].y);
+	dym_d[iz][iy][ix].r = 0;
+	dym_d[iz][iy][ix].phi = GAMMA * ((cos(yt_d[iz][iy][ix].theta) * sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y) / sin(yt_d[iz][iy][ix].theta) + (cos(yt_d[iz][iy][ix].theta) * cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x) / sin(yt_d[iz][iy][ix].theta) - H_s[iz][iy][ix].z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y) / sin(yt_d[iz][iy][ix].theta) - (sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x) / sin(yt_d[iz][iy][ix].theta));
+	dym_d[iz][iy][ix].theta = -GAMMA * (cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y - sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(yt_d[iz][iy][ix].theta) * cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x - H_s[iz][iy][ix].z * sin(yt_d[iz][iy][ix].theta) + cos(yt_d[iz][iy][ix].theta) * sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y);
 
-	yt_d[tx].r = y_s[tx].r + h * dym_d[tx].r;
-	dym_d[tx].r += dyt_d[tx].r;
-	yt_d[tx].phi = y_s[tx].phi + h * dym_d[tx].phi;
-	dym_d[tx].phi += dyt_d[tx].phi;
-	yt_d[tx].theta = y_s[tx].theta + h * dym_d[tx].theta;
-	dym_d[tx].theta += dyt_d[tx].theta;
+	yt_d[iz][iy][ix].r = y_s[iz][iy][ix].r + h * dym_d[iz][iy][ix].r;
+	dym_d[iz][iy][ix].r += dyt_d[iz][iy][ix].r;
+	yt_d[iz][iy][ix].phi = y_s[iz][iy][ix].phi + h * dym_d[iz][iy][ix].phi;
+	dym_d[iz][iy][ix].phi += dyt_d[iz][iy][ix].phi;
+	yt_d[iz][iy][ix].theta = y_s[iz][iy][ix].theta + h * dym_d[iz][iy][ix].theta;
+	dym_d[iz][iy][ix].theta += dyt_d[iz][iy][ix].theta;
 
 	//Fourth step
-	dyt_d[tx].r = 0;
-	dyt_d[tx].phi = GAMMA * ((cos(yt_d[tx].theta) * sin(yt_d[tx].phi) * H_s[tx].y) / sin(yt_d[tx].theta) + (cos(yt_d[tx].theta) * cos(yt_d[tx].phi) * H_s[tx].x) / sin(yt_d[tx].theta) - H_s[tx].z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(yt_d[tx].phi) * H_s[tx].y) / sin(yt_d[tx].theta) - (sin(yt_d[tx].phi) * H_s[tx].x) / sin(yt_d[tx].theta));
-	dyt_d[tx].theta = -GAMMA * (cos(yt_d[tx].phi) * H_s[tx].y - sin(yt_d[tx].phi) * H_s[tx].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(yt_d[tx].theta) * cos(yt_d[tx].phi) * H_s[tx].x - H_s[tx].z * sin(yt_d[tx].theta) + cos(yt_d[tx].theta) * sin(yt_d[tx].phi) * H_s[tx].y);
+	dyt_d[iz][iy][ix].r = 0;
+	dyt_d[iz][iy][ix].phi = GAMMA * ((cos(yt_d[iz][iy][ix].theta) * sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y) / sin(yt_d[iz][iy][ix].theta) + (cos(yt_d[iz][iy][ix].theta) * cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x) / sin(yt_d[iz][iy][ix].theta) - H_s[iz][iy][ix].z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y) / sin(yt_d[iz][iy][ix].theta) - (sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x) / sin(yt_d[iz][iy][ix].theta));
+	dyt_d[iz][iy][ix].theta = -GAMMA * (cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y - sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(yt_d[iz][iy][ix].theta) * cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x - H_s[iz][iy][ix].z * sin(yt_d[iz][iy][ix].theta) + cos(yt_d[iz][iy][ix].theta) * sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y);
 
 	if(i < n) {
-		yout_d[i].r = y_s[tx].r + h6 * (dydx_d[i].r + dyt_d[tx].r + 2.0 * dym_d[tx].r);
-		yout_d[i].phi = y_s[tx].phi + h6 * (dydx_d[i].phi + dyt_d[tx].phi + 2.0 * dym_d[tx].phi);
-		yout_d[i].theta = y_s[tx].theta + h6 * (dydx_d[i].theta + dyt_d[tx].theta + 2.0 * dym_d[tx].theta);
+		yout_d[i].r = y_s[iz][iy][ix].r + h6 * (dydx_s[iz][iy][ix].r + dyt_d[iz][iy][ix].r + 2.0 * dym_d[iz][iy][ix].r);
+		yout_d[i].phi = y_s[iz][iy][ix].phi + h6 * (dydx_s[iz][iy][ix].phi + dyt_d[iz][iy][ix].phi + 2.0 * dym_d[iz][iy][ix].phi);
+		yout_d[i].theta = y_s[iz][iy][ix].theta + h6 * (dydx_s[iz][iy][ix].theta + dyt_d[iz][iy][ix].theta + 2.0 * dym_d[iz][iy][ix].theta);
 	}
 }
 
@@ -260,15 +346,12 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 		}
 
 		//Launch kernel to compute H field
-		computeField<<<gridDim, blockDim>>>(H_d, H, v_d, nvar, state); 
+		//computeField<<<gridDim, blockDim>>>(H_d, H, v_d, nvar, state); 
 
-		rk4Kernel<<<ceil(nvar/VECTOR_SIZE), VECTOR_SIZE>>>(v_d, dv_d, nvar, x, h, yout_d, H_d);
+		rk4Kernel<<<gridDim, blockDim>>>(v_d, nvar, x, h, yout_d, H, state);
 		
 		if(k == (nstep - 1))
 			cudaMemcpy(vout, yout_d, sizeof(SphVector) * nvar, cudaMemcpyDeviceToHost);
-
-		if ((double)(x + h) == x) 
-			fprintf(stderr, "Step size too small in routine rkdumb");
 
 		x += h;
 		xx[k + 1] = x;

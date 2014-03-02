@@ -2,8 +2,8 @@
 #define WIDTH 20 //Atoms in x direction
 #define DEPTH 20 //Atoms in z direction
 
-#define BLOCK_SIZE 8 //Side length of 3D CUDA block
-#define VECTOR_SIZE 256 //Length of 1D CUDA block
+#define BLOCK_SIZE 5 //Side length of 3D CUDA block
+//#define VECTOR_SIZE 256 //Length of 1D CUDA block
 
 #define BENCHMARK 1 //Time the simulation
 
