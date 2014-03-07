@@ -349,7 +349,9 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 
 		//Copy memory to device
 		//After the first timestep, the value of v and yout_d are the same. d2d memcpy is much faster than h2s, so do it instead
-		if(k == 0) gpuErrchk( cudaMemcpy(v_d, v, sizeof(SphVector) * nvar, cudaMemcpyHostToDevice) );
+		if(k == 0) {
+			gpuErrchk( cudaMemcpy(v_d, v, sizeof(SphVector) * nvar, cudaMemcpyHostToDevice) );
+		}
 		else {
 			SphVector *t_d = v_d;
 			v_d = yout_d;
@@ -362,9 +364,9 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 		rk4Kernel<<<gridDim, blockDim>>>(v_d, nvar, x, h, yout_d, H, state);
 		gpuErrchk( cudaPeekAtLastError() );
 		gpuErrchk( cudaDeviceSynchronize() );
-		if(k == (nstep - 1))
+		if(k == (nstep - 1)) {
 			gpuErrchk( cudaMemcpy(vout, yout_d, sizeof(SphVector) * nvar, cudaMemcpyDeviceToHost) );
-
+		}
 		x += h;
 		xx[k + 1] = x;
 		for (int i = 0; i < nvar; i++) {
