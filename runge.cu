@@ -116,6 +116,7 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, cu
 	if(tx < WIDTH && ty < HEIGHT && tz < DEPTH) {
 		//Load block into shared memory
 		M_s[threadIdx.z][threadIdx.y][threadIdx.x] = M[i];
+		__syncthreads();
 
 		//the applied field
 		H_d[i].x = H.x;
