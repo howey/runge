@@ -112,6 +112,7 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, cu
 	int ty = blockIdx.y * BLOCK_SIZE + threadIdx.y;
 	int tz = blockIdx.z * BLOCK_SIZE + threadIdx.z;
 	int i = tz * WIDTH * HEIGHT +  ty * WIDTH + tx;
+	Vector H_t;
 
 	if(tx < WIDTH && ty < HEIGHT && tz < DEPTH) {
 		//Load block into shared memory
@@ -119,14 +120,14 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, cu
 		__syncthreads();
 
 		//the applied field
-		H_d[i].x = H.x;
-		H_d[i].y = H.y;
-		H_d[i].z = H.z;
+		H_t.x = H.x;
+		H_t.y = H.y;
+		H_t.z = H.z;
 
 		//the anisotropy field
-		H_d[i].x += (1/M_s[threadIdx.z][threadIdx.y][threadIdx.x].r) * -2 * KANIS * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].phi) * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta);
-		H_d[i].y += (1/M_s[threadIdx.z][threadIdx.y][threadIdx.x].r) * -2 * KANIS * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].phi) * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta);
-		H_d[i].z += (1/M_s[threadIdx.z][threadIdx.y][threadIdx.x].r) * 2 * KANIS * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta);
+		H_t.x += (1/M_s[threadIdx.z][threadIdx.y][threadIdx.x].r) * -2 * KANIS * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].phi) * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta);
+		H_t.y += (1/M_s[threadIdx.z][threadIdx.y][threadIdx.x].r) * -2 * KANIS * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].phi) * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta);
+		H_t.z += (1/M_s[threadIdx.z][threadIdx.y][threadIdx.x].r) * 2 * KANIS * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta);
 
 		//the field from random thermal motion
 		double vol = ALEN * ALEN * ALEN;
@@ -136,9 +137,9 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, cu
 		double thermY = sd * curand_normal_double(&state[i]);
 		double thermZ = sd * curand_normal_double(&state[i]);
 
-		H_d[i].x += thermX;
-		H_d[i].y += thermY;
-		H_d[i].z += thermZ;
+		H_t.x += thermX;
+		H_t.y += thermY;
+		H_t.z += thermZ;
 
 
 		//the exchange field
@@ -194,9 +195,12 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, cu
 
 		double Hex = JEX / (MSAT * ALEN * ALEN);
 
-		H_d[i].x += Hex * (sin(up.theta) * cos(up.phi) + sin(down.theta) * cos(down.phi) + sin(left.theta) * cos(left.phi) + sin(right.theta) * cos(right.phi) + sin(front.theta) * cos(front.phi) + sin(back.theta) * cos(back.phi));
-		H_d[i].y += Hex * (sin(up.theta) * sin(up.phi) + sin(down.theta) * sin(down.phi) + sin(left.theta) * sin(left.phi) + sin(right.theta) * sin(right.phi) + sin(front.theta) * sin(front.phi) + sin(back.theta) * sin(back.phi)); 
-		H_d[i].z += Hex * (cos(up.theta) + cos(down.theta) + cos(left.theta) + cos(right.theta) + cos(front.theta) + cos(back.theta));
+		H_t.x += Hex * (sin(up.theta) * cos(up.phi) + sin(down.theta) * cos(down.phi) + sin(left.theta) * cos(left.phi) + sin(right.theta) * cos(right.phi) + sin(front.theta) * cos(front.phi) + sin(back.theta) * cos(back.phi));
+		H_t.y += Hex * (sin(up.theta) * sin(up.phi) + sin(down.theta) * sin(down.phi) + sin(left.theta) * sin(left.phi) + sin(right.theta) * sin(right.phi) + sin(front.theta) * sin(front.phi) + sin(back.theta) * sin(back.phi)); 
+		H_t.z += Hex * (cos(up.theta) + cos(down.theta) + cos(left.theta) + cos(right.theta) + cos(front.theta) + cos(back.theta));
+
+		__syncthreads();
+		H_d[i] = H_t;
 	}
 }
 
