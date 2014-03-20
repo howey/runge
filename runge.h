@@ -7,6 +7,8 @@
 
 #define BENCHMARK 1 //Time the simulation
 
+#define DEBUG 0 //Watch CUDA API calls for runtime errors
+
 #define gaussian(mean, sd) ((mean) + (sd) * nextGaussian())
 
 #include <time.h>

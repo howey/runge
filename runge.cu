@@ -1,6 +1,17 @@
 #include <curand_kernel.h>
 #include "runge.h"
 
+//CUDA call error checking
+//From https://stackoverflow.com/questions/14038589
+#define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
+inline void gpuAssert(cudaError_t code, char * file, int line, bool abort=true) {
+	if(code != cudaSuccess) {
+		fprintf(stderr, "GPU Assert!: %s File: %s Line: %d\n", cudaGetErrorString(code), file, line);
+		if(abort)
+			exit(code);
+	}
+}
+
 /* Time is in units of ns */
 static const double ALPHA = 0.02; //dimensionless
 static const double GAMMA = 1.76e-2; //(Oe*ns)^-1
@@ -237,13 +248,18 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	vout = (SphVector *)malloc(sizeof(SphVector) * nvar);
 	dv = (SphVector *)malloc(sizeof(SphVector) * nvar);
 
+	#if DEBUG
+	gpuErrchk( cudaMalloc((void **)&yout_d, sizeof(SphVector) * nvar) );
+	gpuErrchk( cudaMalloc((void **)&v_d, sizeof(SphVector) * nvar) );
+	gpuErrchk( cudaMalloc((void **)&dv_d, sizeof(SphVector) * nvar) );
+	gpuErrchk( cudaMalloc((void **)&H_d, sizeof(SphVector) * nvar) );
+	#else
 	cudaMalloc((void **)&yout_d, sizeof(SphVector) * nvar);
-
-	//allocate device memory for mDot
 	cudaMalloc((void **)&v_d, sizeof(SphVector) * nvar);
 	cudaMalloc((void **)&dv_d, sizeof(SphVector) * nvar);
 	cudaMalloc((void **)&H_d, sizeof(SphVector) * nvar);
-	
+	#endif
+
 	for (int i = 0;i < nvar;i++) { 
 		v[i] = vstart[i];
 		y[i][0] = v[i]; 
@@ -257,7 +273,13 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 
 		//Copy memory to device
 		//After the first timestep, the value of v and yout_d are the same. d2d memcpy is much faster than h2s, so do it instead
-		if(k == 0) cudaMemcpy(v_d, v, sizeof(SphVector) * nvar, cudaMemcpyHostToDevice);
+		if(k == 0) {
+			#if DEBUG
+			gpuErrchk( cudaMemcpy(v_d, v, sizeof(SphVector) * nvar, cudaMemcpyHostToDevice) );
+			#else
+			cudaMemcpy(v_d, v, sizeof(SphVector) * nvar, cudaMemcpyHostToDevice);
+			#endif
+		}
 		else {
 			SphVector *t_d = v_d;
 			v_d = yout_d;
@@ -267,10 +289,26 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 		//Launch kernel to compute H field
 		computeField<<<gridDim, blockDim>>>(H_d, H, v_d, nvar, state); 
 
+		#if DEBUG
+		//Check for kernel launch errors 
+		gpuErrchk( cudaPeekAtLastError() );
+		gpuErrchk( cudaDeviceSynchronize() );
+		#endif
+
 		rk4Kernel<<<ceil(nvar/VECTOR_SIZE), VECTOR_SIZE>>>(v_d, dv_d, nvar, x, h, yout_d, H_d);
 		
-		if(k == (nstep - 1))
+		#if DEBUG
+		gpuErrchk( cudaPeekAtLastError() );
+		gpuErrchk( cudaDeviceSynchronize() );
+		#endif
+
+		if(k == (nstep - 1)) {
+			#if DEBUG
+			gpuErrchk( cudaMemcpy(vout, yout_d, sizeof(SphVector) * nvar, cudaMemcpyDeviceToHost) );
+			#else
 			cudaMemcpy(vout, yout_d, sizeof(SphVector) * nvar, cudaMemcpyDeviceToHost);
+			#endif
+		}
 
 		if ((double)(x + h) == x) 
 			fprintf(stderr, "Step size too small in routine rkdumb");
@@ -287,10 +325,18 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	free(dv);
 	free(vout);
 	free(v);
+	
+	#if DEBUG
+	gpuErrchk( cudaFree(yout_d) );
+	gpuErrchk( cudaFree(v_d) );
+	gpuErrchk( cudaFree(dv_d) );
+	gpuErrchk( cudaFree(H_d) );
+	#else
 	cudaFree(yout_d);
 	cudaFree(v_d);
 	cudaFree(dv_d);
 	cudaFree(H_d);
+	#endif
 }
 
 int main(int argc, char *argv[]) {
@@ -316,9 +362,15 @@ int main(int argc, char *argv[]) {
 
 	//Initialize random number generator
 	unsigned long long seed = time(NULL);
+	#if DEBUG
+	gpuErrchk( cudaMalloc((void **)&state, sizeof(curandStateXORWOW_t) * nvar) );
+	initializeRandom<<<ceil(nvar/512.0), 512>>>(state, nvar, seed);
+	gpuErrchk( cudaPeekAtLastError() );
+	gpuErrchk( cudaDeviceSynchronize() );
+	#else
 	cudaMalloc((void **)&state, sizeof(curandStateXORWOW_t) * nvar);
 	initializeRandom<<<ceil(nvar/512.0), 512>>>(state, nvar, seed);
-	
+	#endif
 	//Configure shared/L1 as 48KB/16KB
 	cudaDeviceSetCacheConfig(cudaFuncCachePreferShared);
 	
@@ -384,6 +436,10 @@ int main(int argc, char *argv[]) {
 	//Probably don't really need these since we're about to exit the program
 	free(xx);
 	free(y);
+	#if DEBUG
+	gpuErrchk( cudaFree(state) );
+	#else
 	cudaFree(state);
+	#endif
 	return 0;
 }
