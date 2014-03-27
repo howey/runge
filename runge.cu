@@ -238,7 +238,7 @@ and xx[0..nstep].
 void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void (*derivs)(double, SphVector[], SphVector[], int, Vector[])) {
 	double x, h;
 	dim3 blockDim(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
-        dim3 gridDim(ceil(WIDTH/BLOCK_SIZE), ceil(HEIGHT/BLOCK_SIZE), ceil(DEPTH/BLOCK_SIZE));	
+        dim3 gridDim(ceil(((float)WIDTH)/((float)BLOCK_SIZE)), ceil(((float)HEIGHT)/((float)BLOCK_SIZE)), ceil(((float)DEPTH)/((float)BLOCK_SIZE)));	
 	SphVector *v, *vout, *dv;
 
 	//device arrays
