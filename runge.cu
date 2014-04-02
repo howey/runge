@@ -41,7 +41,7 @@ __global__ void initializeRandom(curandStateXORWOW_t * state, int nvar, unsigned
 		curand_init(seed, i, 0, &state[i]);
 }
 
-__global__ void rk4Kernel(SphVector * y_d, SphVector * dydx_d, int n, double x, double h, SphVector * yout_d, Vector * H) {
+__global__ void rk4Kernel(SphVector * y_d, int n, double x, double h, SphVector * yout_d, Vector * H) {
 	//device arrays
 	__shared__ SphVector dym_d[VECTOR_SIZE];
 	__shared__ SphVector dyt_d[VECTOR_SIZE];
@@ -104,9 +104,9 @@ __global__ void rk4Kernel(SphVector * y_d, SphVector * dydx_d, int n, double x, 
 	dyt_d[tx].theta = -GAMMA * (cos(yt_d[tx].phi) * H_s[tx].y - sin(yt_d[tx].phi) * H_s[tx].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(yt_d[tx].theta) * cos(yt_d[tx].phi) * H_s[tx].x - H_s[tx].z * sin(yt_d[tx].theta) + cos(yt_d[tx].theta) * sin(yt_d[tx].phi) * H_s[tx].y);
 
 	if(i < n) {
-		yout_d[i].r = y_s[tx].r + h6 * (dydx_d[i].r + dyt_d[tx].r + 2.0 * dym_d[tx].r);
-		yout_d[i].phi = y_s[tx].phi + h6 * (dydx_d[i].phi + dyt_d[tx].phi + 2.0 * dym_d[tx].phi);
-		yout_d[i].theta = y_s[tx].theta + h6 * (dydx_d[i].theta + dyt_d[tx].theta + 2.0 * dym_d[tx].theta);
+		yout_d[i].r = y_s[tx].r + h6 * (dydx_s[tx].r + dyt_d[tx].r + 2.0 * dym_d[tx].r);
+		yout_d[i].phi = y_s[tx].phi + h6 * (dydx_s[tx].phi + dyt_d[tx].phi + 2.0 * dym_d[tx].phi);
+		yout_d[i].theta = y_s[tx].theta + h6 * (dydx_s[tx].theta + dyt_d[tx].theta + 2.0 * dym_d[tx].theta);
 	}
 }
 
@@ -204,7 +204,7 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, cu
 		else
 			back = M[i + (WIDTH * HEIGHT)];
 
-		double Hex = JEX / (MSAT * ALEN * ALEN);
+		double Hex = 2.0 * JEX / (MSAT * ALEN * ALEN);
 
 		H_t.x += Hex * (sin(up.theta) * cos(up.phi) + sin(down.theta) * cos(down.phi) + sin(left.theta) * cos(left.phi) + sin(right.theta) * cos(right.phi) + sin(front.theta) * cos(front.phi) + sin(back.theta) * cos(back.phi));
 		H_t.y += Hex * (sin(up.theta) * sin(up.phi) + sin(down.theta) * sin(down.phi) + sin(left.theta) * sin(left.phi) + sin(right.theta) * sin(right.phi) + sin(front.theta) * sin(front.phi) + sin(back.theta) * sin(back.phi)); 
@@ -215,48 +215,31 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, cu
 	}
 }
 
-__global__ void mDot(double t, SphVector M[], SphVector dMdt[], int nvar, Vector H[]) {
-	int i = threadIdx.x + blockDim.x * blockIdx.x;
-
-	//Compute derivative
-	if(i < nvar) {
-		SphVector M_s = M[i];
-		Vector H_s = H[i];
-
-		dMdt[i].r = 0;
-		dMdt[i].phi = GAMMA * ((cos(M_s.theta) * sin(M_s.phi) * H_s.y) / sin(M_s.theta) + (cos(M_s.theta) * cos(M_s.phi) * H_s.x) / sin(M_s.theta) - H_s.z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(M_s.phi) * H_s.y) / sin(M_s.theta) - (sin(M_s.phi) * H_s.x) / sin(M_s.theta));
-		dMdt[i].theta = -GAMMA * (cos(M_s.phi) * H_s.y - sin(M_s.phi) * H_s.x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(M_s.theta) * cos(M_s.phi) * H_s.x - H_s.z * sin(M_s.theta) + cos(M_s.theta) * sin(M_s.phi) * H_s.y);
-	}
-}
-
 /*
 Starting from initial values vstart[0..nvar-1] known at x1 use fourth-order Runge-Kutta
 to advance nstep equal increments to x2. The user-supplied routine derivs(x,v,dvdx)
 evaluates derivatives. Results are stored in the global variables y[0..nvar-1][0..nstep]
 and xx[0..nstep].
 */
-void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void (*derivs)(double, SphVector[], SphVector[], int, Vector[])) {
+void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep) {
 	double x, h;
 	dim3 blockDim(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
         dim3 gridDim(ceil(((float)WIDTH)/((float)BLOCK_SIZE)), ceil(((float)HEIGHT)/((float)BLOCK_SIZE)), ceil(((float)DEPTH)/((float)BLOCK_SIZE)));	
-	SphVector *v, *vout, *dv;
+	SphVector *v, *vout;
 
 	//device arrays
-	SphVector *v_d, *dv_d, *yout_d;
+	SphVector *v_d, *yout_d;
 
 	v = (SphVector *)malloc(sizeof(SphVector) * nvar);
 	vout = (SphVector *)malloc(sizeof(SphVector) * nvar);
-	dv = (SphVector *)malloc(sizeof(SphVector) * nvar);
 
 	#if DEBUG
 	gpuErrchk( cudaMalloc((void **)&yout_d, sizeof(SphVector) * nvar) );
 	gpuErrchk( cudaMalloc((void **)&v_d, sizeof(SphVector) * nvar) );
-	gpuErrchk( cudaMalloc((void **)&dv_d, sizeof(SphVector) * nvar) );
 	gpuErrchk( cudaMalloc((void **)&H_d, sizeof(SphVector) * nvar) );
 	#else
 	cudaMalloc((void **)&yout_d, sizeof(SphVector) * nvar);
 	cudaMalloc((void **)&v_d, sizeof(SphVector) * nvar);
-	cudaMalloc((void **)&dv_d, sizeof(SphVector) * nvar);
 	cudaMalloc((void **)&H_d, sizeof(SphVector) * nvar);
 	#endif
 
@@ -295,7 +278,7 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 		gpuErrchk( cudaDeviceSynchronize() );
 		#endif
 
-		rk4Kernel<<<ceil(nvar/VECTOR_SIZE), VECTOR_SIZE>>>(v_d, dv_d, nvar, x, h, yout_d, H_d);
+		rk4Kernel<<<ceil(nvar/VECTOR_SIZE), VECTOR_SIZE>>>(v_d, nvar, x, h, yout_d, H_d);
 		
 		#if DEBUG
 		gpuErrchk( cudaPeekAtLastError() );
@@ -322,19 +305,16 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 
 	}
 
-	free(dv);
 	free(vout);
 	free(v);
 	
 	#if DEBUG
 	gpuErrchk( cudaFree(yout_d) );
 	gpuErrchk( cudaFree(v_d) );
-	gpuErrchk( cudaFree(dv_d) );
 	gpuErrchk( cudaFree(H_d) );
 	#else
 	cudaFree(yout_d);
 	cudaFree(v_d);
-	cudaFree(dv_d);
 	cudaFree(H_d);
 	#endif
 }
@@ -405,7 +385,7 @@ int main(int argc, char *argv[]) {
 
 		for(int j = 0; j < 100; j++) {
 			//Simulate!
-			rkdumb(vstart, nvar, endTime * j, endTime * (j + 1) - TIMESTEP, nstep, mDot); 
+			rkdumb(vstart, nvar, endTime * j, endTime * (j + 1) - TIMESTEP, nstep); 
 
 			for(int i = 0; i < nvar; i++) {
 				vstart[i].r = y[i][nstep].r;
