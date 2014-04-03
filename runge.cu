@@ -55,14 +55,20 @@ __global__ void rk4Kernel(SphVector * y_d, int n, double x, double h, SphVector 
 	double hh, h6;
 	int i = threadIdx.x + blockIdx.x * blockDim.x;
 	int tx = threadIdx.x;
-
-
+	
+	//To avoid round-off errors, scale field and time
+	double scale = (2.0 * KANIS / MSAT);
+	h *= scale;
+	
 	hh = h * 0.5;
 	h6 = h / 6.0;
 
 	//Load field into shared memory
 	if(i < n) {
 		H_s[tx] = H[i];
+		H_s[tx].x /= scale;
+		H_s[tx].y /= scale;
+		H_s[tx].z /= scale;
 	}
 
 	//Load input into shared memory
