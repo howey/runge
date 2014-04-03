@@ -30,6 +30,8 @@ static double *xx;
 static SphVector **y;
 static Vector H;
 static Vector *H_d;
+static SphVector *v_d;
+static SphVector *yout_d;
 static curandStateXORWOW_t *state;
 
 __global__ void initializeRandom(curandStateXORWOW_t * state, int nvar, unsigned long long seed) {
@@ -227,21 +229,8 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep) {
         dim3 gridDim(ceil(((float)WIDTH)/((float)BLOCK_SIZE)), ceil(((float)HEIGHT)/((float)BLOCK_SIZE)), ceil(((float)DEPTH)/((float)BLOCK_SIZE)));	
 	SphVector *v, *vout;
 
-	//device arrays
-	SphVector *v_d, *yout_d;
-
 	v = (SphVector *)malloc(sizeof(SphVector) * nvar);
 	vout = (SphVector *)malloc(sizeof(SphVector) * nvar);
-
-	#if DEBUG
-	gpuErrchk( cudaMalloc((void **)&yout_d, sizeof(SphVector) * nvar) );
-	gpuErrchk( cudaMalloc((void **)&v_d, sizeof(SphVector) * nvar) );
-	gpuErrchk( cudaMalloc((void **)&H_d, sizeof(SphVector) * nvar) );
-	#else
-	cudaMalloc((void **)&yout_d, sizeof(SphVector) * nvar);
-	cudaMalloc((void **)&v_d, sizeof(SphVector) * nvar);
-	cudaMalloc((void **)&H_d, sizeof(SphVector) * nvar);
-	#endif
 
 	for (int i = 0;i < nvar;i++) { 
 		v[i] = vstart[i];
@@ -307,16 +296,6 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep) {
 
 	free(vout);
 	free(v);
-	
-	#if DEBUG
-	gpuErrchk( cudaFree(yout_d) );
-	gpuErrchk( cudaFree(v_d) );
-	gpuErrchk( cudaFree(H_d) );
-	#else
-	cudaFree(yout_d);
-	cudaFree(v_d);
-	cudaFree(H_d);
-	#endif
 }
 
 int main(int argc, char *argv[]) {
@@ -371,6 +350,16 @@ int main(int argc, char *argv[]) {
 		y[i] = (SphVector *)malloc(sizeof(SphVector) * (nstep + 1));
 	}
 
+	//Initialize device arrays
+	#if DEBUG
+	gpuErrchk( cudaMalloc((void **)&yout_d, sizeof(SphVector) * nvar) );
+	gpuErrchk( cudaMalloc((void **)&v_d, sizeof(SphVector) * nvar) );
+	gpuErrchk( cudaMalloc((void **)&H_d, sizeof(Vector) * nvar) );
+	#else
+	cudaMalloc((void **)&yout_d, sizeof(SphVector) * nvar);
+	cudaMalloc((void **)&v_d, sizeof(SphVector) * nvar);
+	cudaMalloc((void **)&H_d, sizeof(Vector) * nvar);
+	#endif
 	
 	bool isDecreasing = true;
 	for(int i = 0; i <= (4 * (int)(FIELDRANGE/FIELDSTEP)); i++) {
@@ -417,9 +406,16 @@ int main(int argc, char *argv[]) {
 	free(xx);
 	free(y);
 	#if DEBUG
+	gpuErrchk( cudaFree(yout_d) );
+	gpuErrchk( cudaFree(v_d) );
+	gpuErrchk( cudaFree(H_d) );
 	gpuErrchk( cudaFree(state) );
 	#else
+	cudaFree(yout_d);
+	cudaFree(v_d);
+	cudaFree(H_d);
 	cudaFree(state);
 	#endif
+	
 	return 0;
 }
