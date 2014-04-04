@@ -45,12 +45,12 @@ __global__ void initializeRandom(curandStateXORWOW_t * state, int nvar, unsigned
 
 __global__ void rk4Kernel(SphVector * y_d, int n, double x, double h, SphVector * yout_d, Vector * H) {
 	//intermediate rk4 steps
-	__shared__ SphVector dym_d;
-	__shared__ SphVector dyt_d;
-	__shared__ SphVector yt_d;
-	__shared__ Vector H_s;
-	__shared__ SphVector y_s;
-	__shared__ SphVector dydx_s;
+	SphVector dym_d;
+	SphVector dyt_d;
+	SphVector yt_d;
+	Vector H_s;
+	SphVector y_s;
+	SphVector dydx_s;
 
 	double hh, h6;
 	int i = threadIdx.x + blockIdx.x * blockDim.x;
