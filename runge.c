@@ -158,9 +158,9 @@ void mDot(double t, SphVector M[], SphVector dMdt[], int nvar, Vector H[]) {
 		//Scale field to avoid roundoff errors
 		double scale = (2.0 * KANIS / MSAT);
 		Vector Hsc = H[i];
-		H[i].x /= scale;
-		H[i].y /= scale;
-		H[i].z /= scale;
+		Hsc.x /= scale;
+		Hsc.y /= scale;
+		Hsc.z /= scale;
 
 		dMdt[i].r = 0;
 		dMdt[i].phi = GAMMA * ((cos(M[i].theta) * sin(M[i].phi) * Hsc.y) / sin(M[i].theta) + (cos(M[i].theta) * cos(M[i].phi) * Hsc.x) / sin(M[i].theta) - Hsc.z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(M[i].phi) * Hsc.y) / sin(M[i].theta) - (sin(M[i].phi) * Hsc.x) / sin(M[i].theta));
