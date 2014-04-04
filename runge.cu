@@ -217,7 +217,7 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, cu
 		H_t.y += Hex * (sin(up.theta) * sin(up.phi) + sin(down.theta) * sin(down.phi) + sin(left.theta) * sin(left.phi) + sin(right.theta) * sin(right.phi) + sin(front.theta) * sin(front.phi) + sin(back.theta) * sin(back.phi)); 
 		H_t.z += Hex * (cos(up.theta) + cos(down.theta) + cos(left.theta) + cos(right.theta) + cos(front.theta) + cos(back.theta));
 
-		__syncthreads();
+		//__syncthreads();
 		H_d[i] = H_t;
 	}
 }
