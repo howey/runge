@@ -34,6 +34,10 @@ void rk4(SphVector y[], SphVector dydx[], int n, double x, double h, SphVector y
 	dyt = (SphVector *)malloc(sizeof(SphVector) * n);
 	yt = (SphVector *)malloc(sizeof(SphVector) * n);
 
+	//Scale field and time to avoid roundoff errors
+	double scale = (2.0 * KANIS / MSAT);
+	h *= scale;
+
 	hh = h * 0.5;
 	h6 = h / 6.0;
 	xh = x + hh;
@@ -139,7 +143,7 @@ void computeField(Vector * H, Vector Happl, const SphVector * M, int nvar) {
 		else
 			back = M[i + (WIDTH * HEIGHT)];
 		
-		double Hex = JEX / (MSAT * ALEN * ALEN);
+		double Hex = 2.0 * JEX / (MSAT * ALEN * ALEN);
 
 		H[i].x += Hex * (sin(up.theta) * cos(up.phi) + sin(down.theta) * cos(down.phi) + sin(left.theta) * cos(left.phi) + sin(right.theta) * cos(right.phi) + sin(front.theta) * cos(front.phi) + sin(back.theta) * cos(back.phi));
 		H[i].y += Hex * (sin(up.theta) * sin(up.phi) + sin(down.theta) * sin(down.phi) + sin(left.theta) * sin(left.phi) + sin(right.theta) * sin(right.phi) + sin(front.theta) * sin(front.phi) + sin(back.theta) * sin(back.phi)); 
@@ -151,9 +155,16 @@ void mDot(double t, SphVector M[], SphVector dMdt[], int nvar, Vector H[]) {
 
 	//Compute derivative
 	for(int i = 0; i < nvar; i++) {
+		//Scale field to avoid roundoff errors
+		double scale = (2.0 * KANIS / MSAT);
+		Vector Hsc = H[i];
+		H[i].x /= scale;
+		H[i].y /= scale;
+		H[i].z /= scale;
+
 		dMdt[i].r = 0;
-		dMdt[i].phi = GAMMA * ((cos(M[i].theta) * sin(M[i].phi) * H[i].y) / sin(M[i].theta) + (cos(M[i].theta) * cos(M[i].phi) * H[i].x) / sin(M[i].theta) - H[i].z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(M[i].phi) * H[i].y) / sin(M[i].theta) - (sin(M[i].phi) * H[i].x) / sin(M[i].theta));
-		dMdt[i].theta = -GAMMA * (cos(M[i].phi) * H[i].y - sin(M[i].phi) * H[i].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(M[i].theta) * cos(M[i].phi) * H[i].x - H[i].z * sin(M[i].theta) + cos(M[i].theta) * sin(M[i].phi) * H[i].y);
+		dMdt[i].phi = GAMMA * ((cos(M[i].theta) * sin(M[i].phi) * Hsc.y) / sin(M[i].theta) + (cos(M[i].theta) * cos(M[i].phi) * Hsc.x) / sin(M[i].theta) - Hsc.z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(M[i].phi) * Hsc.y) / sin(M[i].theta) - (sin(M[i].phi) * Hsc.x) / sin(M[i].theta));
+		dMdt[i].theta = -GAMMA * (cos(M[i].phi) * Hsc.y - sin(M[i].phi) * Hsc.x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(M[i].theta) * cos(M[i].phi) * Hsc.x - Hsc.z * sin(M[i].theta) + cos(M[i].theta) * sin(M[i].phi) * Hsc.y);
 	}
 }
 
