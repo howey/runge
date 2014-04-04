@@ -44,17 +44,16 @@ __global__ void initializeRandom(curandStateXORWOW_t * state, int nvar, unsigned
 }
 
 __global__ void rk4Kernel(SphVector * y_d, int n, double x, double h, SphVector * yout_d, Vector * H) {
-	//device arrays
-	__shared__ SphVector dym_d[VECTOR_SIZE];
-	__shared__ SphVector dyt_d[VECTOR_SIZE];
-	__shared__ SphVector yt_d[VECTOR_SIZE];
-	__shared__ Vector H_s[VECTOR_SIZE];
-	__shared__ SphVector y_s[VECTOR_SIZE];
-	__shared__ SphVector dydx_s[VECTOR_SIZE];
+	//intermediate rk4 steps
+	__shared__ SphVector dym_d;
+	__shared__ SphVector dyt_d;
+	__shared__ SphVector yt_d;
+	__shared__ Vector H_s;
+	__shared__ SphVector y_s;
+	__shared__ SphVector dydx_s;
 
 	double hh, h6;
 	int i = threadIdx.x + blockIdx.x * blockDim.x;
-	int tx = threadIdx.x;
 	
 	//To avoid round-off errors, scale field and time
 	double scale = (2.0 * KANIS / MSAT);
@@ -63,58 +62,58 @@ __global__ void rk4Kernel(SphVector * y_d, int n, double x, double h, SphVector 
 	hh = h * 0.5;
 	h6 = h / 6.0;
 
-	//Load field into shared memory
+	//Load field 
 	if(i < n) {
-		H_s[tx] = H[i];
-		H_s[tx].x /= scale;
-		H_s[tx].y /= scale;
-		H_s[tx].z /= scale;
+		H_s = H[i];
+		H_s.x /= scale;
+		H_s.y /= scale;
+		H_s.z /= scale;
 	}
 
-	//Load input into shared memory
+	//Load input
 	if(i < n) {
-		y_s[tx] = y_d[i];
+		y_s = y_d[i];
 	}
 
 	//First step
-	dydx_s[tx].r = 0;
-	dydx_s[tx].phi = GAMMA * ((cos(y_s[tx].theta) * sin(y_s[tx].phi) * H_s[tx].y) / sin(y_s[tx].theta) + (cos(y_s[tx].theta) * cos(y_s[tx].phi) * H_s[tx].x) / sin(y_s[tx].theta) - H_s[tx].z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(y_s[tx].phi) * H_s[tx].y) / sin(y_s[tx].theta) - (sin(y_s[tx].phi) * H_s[tx].x) / sin(y_s[tx].theta));
-	dydx_s[tx].theta = -GAMMA * (cos(y_s[tx].phi) * H_s[tx].y - sin(y_s[tx].phi) * H_s[tx].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(y_s[tx].theta) * cos(y_s[tx].phi) * H_s[tx].x - H_s[tx].z * sin(y_s[tx].theta) + cos(y_s[tx].theta) * sin(y_s[tx].phi) * H_s[tx].y);
+	dydx_s.r = 0;
+	dydx_s.phi = GAMMA * ((cos(y_s.theta) * sin(y_s.phi) * H_s.y) / sin(y_s.theta) + (cos(y_s.theta) * cos(y_s.phi) * H_s.x) / sin(y_s.theta) - H_s.z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(y_s.phi) * H_s.y) / sin(y_s.theta) - (sin(y_s.phi) * H_s.x) / sin(y_s.theta));
+	dydx_s.theta = -GAMMA * (cos(y_s.phi) * H_s.y - sin(y_s.phi) * H_s.x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(y_s.theta) * cos(y_s.phi) * H_s.x - H_s.z * sin(y_s.theta) + cos(y_s.theta) * sin(y_s.phi) * H_s.y);
 
-	yt_d[tx].r = y_s[tx].r + hh * dydx_s[tx].r;
-	yt_d[tx].phi = y_s[tx].phi + hh * dydx_s[tx].phi;
-	yt_d[tx].theta = y_s[tx].theta + hh * dydx_s[tx].theta;
+	yt_d.r = y_s.r + hh * dydx_s.r;
+	yt_d.phi = y_s.phi + hh * dydx_s.phi;
+	yt_d.theta = y_s.theta + hh * dydx_s.theta;
 
 	//Second step
-	dyt_d[tx].r = 0;
-	dyt_d[tx].phi = GAMMA * ((cos(yt_d[tx].theta) * sin(yt_d[tx].phi) * H_s[tx].y) / sin(yt_d[tx].theta) + (cos(yt_d[tx].theta) * cos(yt_d[tx].phi) * H_s[tx].x) / sin(yt_d[tx].theta) - H_s[tx].z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(yt_d[tx].phi) * H_s[tx].y) / sin(yt_d[tx].theta) - (sin(yt_d[tx].phi) * H_s[tx].x) / sin(yt_d[tx].theta));
-	dyt_d[tx].theta = -GAMMA * (cos(yt_d[tx].phi) * H_s[tx].y - sin(yt_d[tx].phi) * H_s[tx].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(yt_d[tx].theta) * cos(yt_d[tx].phi) * H_s[tx].x - H_s[tx].z * sin(yt_d[tx].theta) + cos(yt_d[tx].theta) * sin(yt_d[tx].phi) * H_s[tx].y);
+	dyt_d.r = 0;
+	dyt_d.phi = GAMMA * ((cos(yt_d.theta) * sin(yt_d.phi) * H_s.y) / sin(yt_d.theta) + (cos(yt_d.theta) * cos(yt_d.phi) * H_s.x) / sin(yt_d.theta) - H_s.z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(yt_d.phi) * H_s.y) / sin(yt_d.theta) - (sin(yt_d.phi) * H_s.x) / sin(yt_d.theta));
+	dyt_d.theta = -GAMMA * (cos(yt_d.phi) * H_s.y - sin(yt_d.phi) * H_s.x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(yt_d.theta) * cos(yt_d.phi) * H_s.x - H_s.z * sin(yt_d.theta) + cos(yt_d.theta) * sin(yt_d.phi) * H_s.y);
 
-	yt_d[tx].r = y_s[tx].r + hh * dyt_d[tx].r;
-	yt_d[tx].phi = y_s[tx].phi + hh * dyt_d[tx].phi;
-	yt_d[tx].theta = y_s[tx].theta + hh * dyt_d[tx].theta;
+	yt_d.r = y_s.r + hh * dyt_d.r;
+	yt_d.phi = y_s.phi + hh * dyt_d.phi;
+	yt_d.theta = y_s.theta + hh * dyt_d.theta;
 
 	//Third step
-	dym_d[tx].r = 0;
-	dym_d[tx].phi = GAMMA * ((cos(yt_d[tx].theta) * sin(yt_d[tx].phi) * H_s[tx].y) / sin(yt_d[tx].theta) + (cos(yt_d[tx].theta) * cos(yt_d[tx].phi) * H_s[tx].x) / sin(yt_d[tx].theta) - H_s[tx].z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(yt_d[tx].phi) * H_s[tx].y) / sin(yt_d[tx].theta) - (sin(yt_d[tx].phi) * H_s[tx].x) / sin(yt_d[tx].theta));
-	dym_d[tx].theta = -GAMMA * (cos(yt_d[tx].phi) * H_s[tx].y - sin(yt_d[tx].phi) * H_s[tx].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(yt_d[tx].theta) * cos(yt_d[tx].phi) * H_s[tx].x - H_s[tx].z * sin(yt_d[tx].theta) + cos(yt_d[tx].theta) * sin(yt_d[tx].phi) * H_s[tx].y);
+	dym_d.r = 0;
+	dym_d.phi = GAMMA * ((cos(yt_d.theta) * sin(yt_d.phi) * H_s.y) / sin(yt_d.theta) + (cos(yt_d.theta) * cos(yt_d.phi) * H_s.x) / sin(yt_d.theta) - H_s.z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(yt_d.phi) * H_s.y) / sin(yt_d.theta) - (sin(yt_d.phi) * H_s.x) / sin(yt_d.theta));
+	dym_d.theta = -GAMMA * (cos(yt_d.phi) * H_s.y - sin(yt_d.phi) * H_s.x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(yt_d.theta) * cos(yt_d.phi) * H_s.x - H_s.z * sin(yt_d.theta) + cos(yt_d.theta) * sin(yt_d.phi) * H_s.y);
 
-	yt_d[tx].r = y_s[tx].r + h * dym_d[tx].r;
-	dym_d[tx].r += dyt_d[tx].r;
-	yt_d[tx].phi = y_s[tx].phi + h * dym_d[tx].phi;
-	dym_d[tx].phi += dyt_d[tx].phi;
-	yt_d[tx].theta = y_s[tx].theta + h * dym_d[tx].theta;
-	dym_d[tx].theta += dyt_d[tx].theta;
+	yt_d.r = y_s.r + h * dym_d.r;
+	dym_d.r += dyt_d.r;
+	yt_d.phi = y_s.phi + h * dym_d.phi;
+	dym_d.phi += dyt_d.phi;
+	yt_d.theta = y_s.theta + h * dym_d.theta;
+	dym_d.theta += dyt_d.theta;
 
 	//Fourth step
-	dyt_d[tx].r = 0;
-	dyt_d[tx].phi = GAMMA * ((cos(yt_d[tx].theta) * sin(yt_d[tx].phi) * H_s[tx].y) / sin(yt_d[tx].theta) + (cos(yt_d[tx].theta) * cos(yt_d[tx].phi) * H_s[tx].x) / sin(yt_d[tx].theta) - H_s[tx].z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(yt_d[tx].phi) * H_s[tx].y) / sin(yt_d[tx].theta) - (sin(yt_d[tx].phi) * H_s[tx].x) / sin(yt_d[tx].theta));
-	dyt_d[tx].theta = -GAMMA * (cos(yt_d[tx].phi) * H_s[tx].y - sin(yt_d[tx].phi) * H_s[tx].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(yt_d[tx].theta) * cos(yt_d[tx].phi) * H_s[tx].x - H_s[tx].z * sin(yt_d[tx].theta) + cos(yt_d[tx].theta) * sin(yt_d[tx].phi) * H_s[tx].y);
+	dyt_d.r = 0;
+	dyt_d.phi = GAMMA * ((cos(yt_d.theta) * sin(yt_d.phi) * H_s.y) / sin(yt_d.theta) + (cos(yt_d.theta) * cos(yt_d.phi) * H_s.x) / sin(yt_d.theta) - H_s.z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(yt_d.phi) * H_s.y) / sin(yt_d.theta) - (sin(yt_d.phi) * H_s.x) / sin(yt_d.theta));
+	dyt_d.theta = -GAMMA * (cos(yt_d.phi) * H_s.y - sin(yt_d.phi) * H_s.x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(yt_d.theta) * cos(yt_d.phi) * H_s.x - H_s.z * sin(yt_d.theta) + cos(yt_d.theta) * sin(yt_d.phi) * H_s.y);
 
 	if(i < n) {
-		yout_d[i].r = y_s[tx].r + h6 * (dydx_s[tx].r + dyt_d[tx].r + 2.0 * dym_d[tx].r);
-		yout_d[i].phi = y_s[tx].phi + h6 * (dydx_s[tx].phi + dyt_d[tx].phi + 2.0 * dym_d[tx].phi);
-		yout_d[i].theta = y_s[tx].theta + h6 * (dydx_s[tx].theta + dyt_d[tx].theta + 2.0 * dym_d[tx].theta);
+		yout_d[i].r = y_s.r + h6 * (dydx_s.r + dyt_d.r + 2.0 * dym_d.r);
+		yout_d[i].phi = y_s.phi + h6 * (dydx_s.phi + dyt_d.phi + 2.0 * dym_d.phi);
+		yout_d[i].theta = y_s.theta + h6 * (dydx_s.theta + dyt_d.theta + 2.0 * dym_d.theta);
 	}
 }
 
