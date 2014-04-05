@@ -324,11 +324,14 @@ int main(int argc, char *argv[]) {
 	double endTime;
 	SphVector vstart[nvar]; 
 
-	FILE * output = fopen("output.txt", "w");
+	char * jobId = getenv("PBS_JOBID");
+	FILE * output = fopen(jobId, "w");
+	/*
 	if(output == NULL) {
 		printf("error opening file\n");
 		return 0;
 	}
+	*/
 
 	#if BENCHMARK
 	FILE * times = fopen("times.txt", "w");
