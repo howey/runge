@@ -15,16 +15,19 @@ inline void gpuAssert(cudaError_t code, char * file, int line, bool abort=true) 
 /* Time is in units of ns */
 static const double ALPHA = 0.02; //dimensionless
 static const double GAMMA = 1.76e-2; //(Oe*ns)^-1
-static const double KANIS = 7.0e7; //erg*cm^-3
+static const double KANIS = 4.4e7; //erg*cm^-3
 static const double TIMESTEP = (1e-7); //ns, the integrator timestep
 static const double MSAT = 1100.0; //emu*cm^-3
 static const double JEX = 1.1e-6; //erg*cm^-1
 static const double ALEN = 3e-8; //cm
-static const double TEMP = 0.0; //K
+static const double TEMPAMB = 300.0; //K, the ambient temperature
 static const double BOLTZ = 1.38e-34; //g*cm^2*ns^-2*K^-1
-static const double FIELDSTEP = 500.0; //Oe, the change in the applied field
-static const double FIELDTIMESTEP = 0.1; //ns, time to wait before changing applied field
-static const double FIELDRANGE = 130000.0; //Oe, create loop from FIELDRANGE to -FIELDRANGE Oe
+//static const double FIELDSTEP = 500.0; //Oe, the change in the applied field
+//static const double FIELDTIMESTEP = 0.1; //ns, time to wait before changing applied field
+//static const double FIELDRANGE = 130000.0; //Oe, create loop from FIELDRANGE to -FIELDRANGE Oe
+static const double TPULSE = 1.269; //ns, the duration of the laser pulse
+static const double TAU = 0.0551197; //ns, the time constant of the laser heating
+static const double TEMPDELTA = 350.0; //K, the change in temperature produced by laser
 
 static double *xx;
 static SphVector **y;
@@ -117,8 +120,8 @@ __global__ void rk4Kernel(SphVector * y_d, int n, double x, double h, SphVector 
 	}
 }
 
-//Computes the local applied field for every atom of moment M. The global applied field is passed in as H. 
-__global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, curandStateXORWOW_t * state) {
+//Computes the local applied field for every atom of moment M. The global applied field is passed in as H, and the temperature as temp.
+__global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, curandStateXORWOW_t * state, double temp) {
 	/* Declare shared memory for CUDA block.
 	   Since a halo element neighbors only one atom,
 	   halo elements are not loaded into shared memory.
@@ -149,7 +152,7 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, cu
 
 		//the field from random thermal motion
 		double vol = ALEN * ALEN * ALEN;
-		double sd = (1e9) * sqrt((2 * BOLTZ * TEMP * ALPHA)/(GAMMA * vol * MSAT * TIMESTEP)); //time has units of s here
+		double sd = (1e9) * sqrt((2 * BOLTZ * temp * ALPHA)/(GAMMA * vol * MSAT * TIMESTEP)); //time has units of s here
 
 		double thermX = sd * curand_normal_double(&state[i]); 
 		double thermY = sd * curand_normal_double(&state[i]);
@@ -229,7 +232,7 @@ evaluates derivatives. Results are stored in the global variables y[0..nvar-1][0
 and xx[0..nstep].
 */
 void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep) {
-	double x, h;
+	double x, h, temp = TEMPAMB;
 	dim3 blockDim(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
         dim3 gridDim(ceil(((float)WIDTH)/((float)BLOCK_SIZE)), ceil(((float)HEIGHT)/((float)BLOCK_SIZE)), ceil(((float)DEPTH)/((float)BLOCK_SIZE)));	
 	SphVector *v, *vout;
@@ -248,6 +251,18 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep) {
 
 	for (int k = 0; k < nstep; k++) {
 
+		if(!(k % 1000)) {
+			double t = x1 + k * TIMESTEP;
+			if(t < TPULSE) {
+				double g = 1 - exp(-t/TAU);
+				temp = TEMPAMB + TEMPDELTA * g;
+			}
+			else if(t > TPULSE) {
+				double g = exp(-(t - TPULSE)/TAU);
+				temp = TEMPAMB + TEMPDELTA * g;
+			}
+		}
+
 		//Copy memory to device
 		//After the first timestep, the value of v and yout_d are the same. d2d memcpy is much faster than h2s, so do it instead
 		if(k == 0) {
@@ -264,7 +279,7 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep) {
 		}
 
 		//Launch kernel to compute H field
-		computeField<<<gridDim, blockDim>>>(H_d, H, v_d, nvar, state); 
+		computeField<<<gridDim, blockDim>>>(H_d, H, v_d, nvar, state, temp); 
 
 		#if DEBUG
 		//Check for kernel launch errors 
@@ -321,7 +336,7 @@ int main(int argc, char *argv[]) {
 		printf("error opening file: times.txt\n");
 		return 1;
 	}
-	fprintf(times, "Time to simulate %fns\n", FIELDTIMESTEP);
+	//fprintf(times, "Time to simulate %fns\n", FIELDTIMESTEP);
 	#endif
 
 	//Initialize random number generator
@@ -340,12 +355,15 @@ int main(int argc, char *argv[]) {
 	
 	for(int i = 0; i < nvar; i++) {	
 		vstart[i].r = MSAT;
-		vstart[i].theta = 0.01;
+		//vstart[i].theta = 0.01;
+		vstart[i].theta = 3.13;
 		vstart[i].phi = 0;
 	}
 
-	Vector Happl = {0.0, 0.0, FIELDRANGE};
-	endTime = FIELDTIMESTEP; 
+	//Vector Happl = {0.0, 0.0, FIELDRANGE};
+	Vector Happl = {0.0, 0.0, 0.5e4};	
+	//endTime = FIELDTIMESTEP; 
+	endTime = 2.538;
 	endTime /= 100; //Reduce host memory usage
 	nstep = ((int)ceil(endTime/TIMESTEP));
 
@@ -366,8 +384,8 @@ int main(int argc, char *argv[]) {
 	cudaMalloc((void **)&H_d, sizeof(Vector) * nvar);
 	#endif
 	
-	bool isDecreasing = true;
-	for(int i = 0; i <= (4 * (int)(FIELDRANGE/FIELDSTEP)); i++) {
+	//bool isDecreasing = true;
+	for(int i = 0; i <= 0; i++) {
 		//Applied field
 		H.x = Happl.x;
 		H.y = Happl.y;
@@ -386,6 +404,15 @@ int main(int argc, char *argv[]) {
 				vstart[i].theta = y[i][nstep].theta;
 				vstart[i].phi = y[i][nstep].phi;
 			}
+
+			double mag = 0.0;	
+			for(int k = 0; k < nvar; k++) {
+				mag += (y[k][nstep].r)*cos(y[k][nstep].theta);
+			}
+
+			mag /= (double)nvar;
+			fprintf(output, "%f\t%f\n", endTime * (j + 1), mag);
+			fflush(output);
 		}
 	
 		#if BENCHMARK
@@ -394,6 +421,7 @@ int main(int argc, char *argv[]) {
 		fflush(times);
 		#endif
 
+		/*
 		double mag = 0.0;	
 		for(int k = 0; k < nvar; k++) {
 			mag += (y[k][nstep].r)*cos(y[k][nstep].theta);
@@ -406,6 +434,7 @@ int main(int argc, char *argv[]) {
 		//Adjust applied field strength at endTime intervals	
 		if(Happl.z + FIELDRANGE < 1.0) isDecreasing = false;
 		isDecreasing ? (Happl.z -= FIELDSTEP) : (Happl.z += FIELDSTEP);
+		*/
 	}
 	//Probably don't really need these since we're about to exit the program
 	free(xx);

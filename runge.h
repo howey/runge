@@ -1,13 +1,13 @@
-#define HEIGHT 20 //Atoms in y direction
-#define WIDTH 20 //Atoms in x direction
-#define DEPTH 20 //Atoms in z direction
+#define HEIGHT 23 //Atoms in y direction
+#define WIDTH 23 //Atoms in x direction
+#define DEPTH 23 //Atoms in z direction
 
-#define BLOCK_SIZE 8 //Side length of 3D CUDA block
+#define BLOCK_SIZE 10 //Side length of 3D CUDA block
 #define VECTOR_SIZE 256 //Length of 1D CUDA block
 
-#define BENCHMARK 1 //Time the simulation
+#define BENCHMARK 0 //Time the simulation
 
-#define DEBUG 0 //Watch CUDA API calls for runtime errors
+#define DEBUG 1 //Watch CUDA API calls for runtime errors
 
 #define gaussian(mean, sd) ((mean) + (sd) * nextGaussian())
 
