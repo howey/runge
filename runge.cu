@@ -1,3 +1,8 @@
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <string.h>
+
 #include <curand_kernel.h>
 #include "runge.h"
 
@@ -329,15 +334,22 @@ int main(int argc, char *argv[]) {
 	double endTime;
 	SphVector vstart[nvar]; 
 
+	char * fileName[128] = {0};
 	char * jobId = getenv("PBS_JOBID");
-	//FILE * output = fopen(jobId, "w");
-	output = fopen(jobId, "w");
-	/*
-	if(output == NULL) {
-		printf("error opening file\n");
-		return 0;
+	strcpy(fileName, jobId);
+
+	//Check if a file named fileName already exists, needed for two-GPU jobs
+	struct stat buffer;
+	int fd = stat(fileName, &buffer);
+	if(fd < 0) {
+		//file doesn't exist
+		output = fopen(fileName, "w");
 	}
-	*/
+	else {
+		//file exists
+		strcat(fileName, "-1");
+		output = fopen(fileName, "w");
+	}
 
 	#if BENCHMARK
 	FILE * times = fopen("times.txt", "w");
