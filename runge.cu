@@ -334,7 +334,7 @@ int main(int argc, char *argv[]) {
 	double endTime;
 	SphVector vstart[nvar]; 
 
-	char * fileName[128] = {0};
+	char fileName[128] = {0};
 	char * jobId = getenv("PBS_JOBID");
 	strcpy(fileName, jobId);
 
