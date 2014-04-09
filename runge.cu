@@ -27,7 +27,7 @@ static const double BOLTZ = 1.38e-34; //g*cm^2*ns^-2*K^-1
 //static const double FIELDRANGE = 130000.0; //Oe, create loop from FIELDRANGE to -FIELDRANGE Oe
 static const double TPULSE = 1.269; //ns, the duration of the laser pulse
 static const double TAU = 0.0551197; //ns, the time constant of the laser heating
-static const double TEMPDELTA = 350.0; //K, the change in temperature produced by laser
+static const double TEMPDELTA = 400.0; //K, the change in temperature produced by laser
 
 static double *xx;
 static SphVector **y;
@@ -36,6 +36,7 @@ static Vector *H_d;
 static SphVector *v_d;
 static SphVector *yout_d;
 static curandStateXORWOW_t *state;
+static FILE * output;
 
 __global__ void initializeRandom(curandStateXORWOW_t * state, int nvar, unsigned long long seed) {
 	//the thread id
@@ -253,7 +254,7 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep) {
 
 		if(!(k % 1000)) {
 			double t = x1 + k * TIMESTEP;
-			if(t < TPULSE) {
+			if(t <= TPULSE) {
 				double g = 1 - exp(-t/TAU);
 				temp = TEMPAMB + TEMPDELTA * g;
 			}
@@ -261,6 +262,10 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep) {
 				double g = exp(-(t - TPULSE)/TAU);
 				temp = TEMPAMB + TEMPDELTA * g;
 			}
+		}
+
+		if(k == 0){
+			fprintf(output, "%f\t", temp);
 		}
 
 		//Copy memory to device
@@ -325,7 +330,8 @@ int main(int argc, char *argv[]) {
 	SphVector vstart[nvar]; 
 
 	char * jobId = getenv("PBS_JOBID");
-	FILE * output = fopen(jobId, "w");
+	//FILE * output = fopen(jobId, "w");
+	output = fopen(jobId, "w");
 	/*
 	if(output == NULL) {
 		printf("error opening file\n");
@@ -366,7 +372,8 @@ int main(int argc, char *argv[]) {
 	//Vector Happl = {0.0, 0.0, FIELDRANGE};
 	Vector Happl = {0.0, 0.0, 0.5e4};	
 	//endTime = FIELDTIMESTEP; 
-	endTime = 2.538;
+	//endTime = 2.538;
+	endTime = 2.0 * TPULSE;
 	endTime /= 100; //Reduce host memory usage
 	nstep = ((int)ceil(endTime/TIMESTEP));
 
@@ -439,6 +446,8 @@ int main(int argc, char *argv[]) {
 		isDecreasing ? (Happl.z -= FIELDSTEP) : (Happl.z += FIELDSTEP);
 		*/
 	}
+	
+	fclose(output);
 	//Probably don't really need these since we're about to exit the program
 	free(xx);
 	free(y);
