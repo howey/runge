@@ -163,7 +163,8 @@ __global__ void computeField(Vector * H_d, Vector H, Vector * Htherm_d, SphVecto
 		H_t.y += Hex * (sin(up.theta) * sin(up.phi) + sin(down.theta) * sin(down.phi) + sin(left.theta) * sin(left.phi) + sin(right.theta) * sin(right.phi) + sin(front.theta) * sin(front.phi) + sin(back.theta) * sin(back.phi)); 
 		H_t.z += Hex * (cos(up.theta) + cos(down.theta) + cos(left.theta) + cos(right.theta) + cos(front.theta) + cos(back.theta));
 
-		//__syncthreads();
+		//Scale field to avoid round-off errors
+		H_t /= ((2.0 * KANIS) / MSAT);
 		H_d[i] = H_t;
 	}
 }
@@ -187,6 +188,9 @@ void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVect
 	cudaMalloc((void **)&dym_d, sizeof(SphVector) * n);
 	cudaMalloc((void **)&dyt_d, sizeof(SphVector) * n);
 	cudaMalloc((void **)&yt_d, sizeof(SphVector) * n);
+
+	//Scale field to avoid round-off errors
+	h *= ((2.0 * KANIS) / MSAT);
 
 	hh = h * 0.5;
 	h6 = h / 6.0;
