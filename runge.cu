@@ -19,6 +19,7 @@ static double *xx;
 static SphVector **y;
 static Vector H;
 static Vector *H_d;
+static Vector * Htherm_d;
 static SphVector *yout_d;
 static curandStateXORWOW_t *state;
 
@@ -70,57 +71,8 @@ __global__ void rk4Fourth(SphVector *yout_d, SphVector *y_d, SphVector *dydx_d, 
 	}
 }
 
-//Shamelessly copied from Numerical Recipes
-/*
-Given values for the variables y[1..n] and their derivatives dydx[1..n] known at x , use the
-fourth-order Runge-Kutta method to advance the solution over an interval h and return the
-incremented variables as yout[1..n] , which need not be a distinct array from y . The user
-supplies the routine derivs(x,y,dydx) , which returns derivatives dydx at x .
-*/
-void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVector yout[], void (*derivs)(double, SphVector[], SphVector[], int, Vector[]), bool CopyToHost) {
-	double xh, hh, h6; 
-
-	//device arrays
-	SphVector *dym_d, *dyt_d, *yt_d;
-
-	//allocate device arrays
-	cudaMalloc((void **)&dym_d, sizeof(SphVector) * n);
-	cudaMalloc((void **)&dyt_d, sizeof(SphVector) * n);
-	cudaMalloc((void **)&yt_d, sizeof(SphVector) * n);
-
-	hh = h * 0.5;
-	h6 = h / 6.0;
-	xh = x + hh;
-
-	//First step
-	rk4First<<<ceil(n/512.0), 512>>>(yt_d, y_d, dydx_d, hh, n);
-
-	//Second step
-	(*derivs)<<<ceil(n/512.0), 512>>>(xh, yt_d, dyt_d, n, H_d);
-	rk4Second<<<ceil(n/512.0), 512>>>(yt_d, y_d, dyt_d, hh, n);
-
-	//Third step
-	(*derivs)<<<ceil(n/512.0), 512>>>(xh, yt_d, dym_d, n, H_d);
-	rk4Third<<<ceil(n/512.0), 512>>>(yt_d, y_d, dym_d, dyt_d, h, n);
-
-	//Fourth step
-	(*derivs)<<<ceil(n/512.0), 512>>>(x + h, yt_d, dyt_d, n, H_d);
-	//Accumulate increments with proper weights
-	rk4Fourth<<<ceil(n/512.0), 512>>>(yout_d, y_d, dydx_d, dyt_d, dym_d, h6, n);
-
-	//Copy yout to host
-	if(CopyToHost)
-		cudaMemcpy(yout, yout_d, sizeof(SphVector) * n, cudaMemcpyDeviceToHost);
-	
-	//Free device arrays
-	cudaFree(yt_d);
-	cudaFree(dyt_d);
-	cudaFree(dym_d);
-	//cudaFree(yout_d);
-}
-
-//Computes the local applied field for every atom of moment M. The global applied field is passed in as H. 
-__global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, curandStateXORWOW_t * state) {
+//Computes the local applied field for every atom of moment M. The global applied field is passed in as H, and the thermal motion as Htherm. 
+__global__ void computeField(Vector * H_d, Vector H, Vector * Htherm_d, SphVector * M, int nvar) {
 	/* Declare shared memory for CUDA block.
 	   Since a halo element neighbors only one atom,
 	   halo elements are not loaded into shared memory.
@@ -132,33 +84,27 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, cu
 	int ty = blockIdx.y * BLOCK_SIZE + threadIdx.y;
 	int tz = blockIdx.z * BLOCK_SIZE + threadIdx.z;
 	int i = tz * WIDTH * HEIGHT +  ty * WIDTH + tx;
+	Vector H_t;
 
 	if(tx < WIDTH && ty < HEIGHT && tz < DEPTH) {
 		//Load block into shared memory
 		M_s[threadIdx.z][threadIdx.y][threadIdx.x] = M[i];
+		__syncthreads();
 
 		//the applied field
-		H_d[i].x = H.x;
-		H_d[i].y = H.y;
-		H_d[i].z = H.z;
+		H_t.x = H.x;
+		H_t.y = H.y;
+		H_t.z = H.z;
 
 		//the anisotropy field
-		H_d[i].x += (1/M_s[threadIdx.z][threadIdx.y][threadIdx.x].r) * -2 * KANIS * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].phi) * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta);
-		H_d[i].y += (1/M_s[threadIdx.z][threadIdx.y][threadIdx.x].r) * -2 * KANIS * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].phi) * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta);
-		H_d[i].z += (1/M_s[threadIdx.z][threadIdx.y][threadIdx.x].r) * 2 * KANIS * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta);
+		H_t.x += (1/M_s[threadIdx.z][threadIdx.y][threadIdx.x].r) * -2 * KANIS * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].phi) * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta);
+		H_t.y += (1/M_s[threadIdx.z][threadIdx.y][threadIdx.x].r) * -2 * KANIS * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].phi) * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta);
+		H_t.z += (1/M_s[threadIdx.z][threadIdx.y][threadIdx.x].r) * 2 * KANIS * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta);
 
 		//the field from random thermal motion
-		double vol = ALEN * ALEN * ALEN;
-		double sd = (1e9) * sqrt((2 * BOLTZ * TEMP * ALPHA)/(GAMMA * vol * MSAT * TIMESTEP)); //time has units of s here
-
-		double thermX = sd * curand_normal_double(&state[i]); 
-		double thermY = sd * curand_normal_double(&state[i]);
-		double thermZ = sd * curand_normal_double(&state[i]);
-
-		H_d[i].x += thermX;
-		H_d[i].y += thermY;
-		H_d[i].z += thermZ;
-
+		H_t.x += Htherm_d[i].x;
+		H_t.y += Htherm_d[i].y;
+		H_t.z += Htherm_d[i].z;
 
 		//the exchange field
 		SphVector up, down, left, right, front, back;
@@ -211,12 +157,87 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, cu
 		else
 			back = M[i + (WIDTH * HEIGHT)];
 
-		double Hex = JEX / (MSAT * ALEN * ALEN);
+		double Hex = 2.0 * JEX / (MSAT * ALEN * ALEN);
 
-		H_d[i].x += Hex * (sin(up.theta) * cos(up.phi) + sin(down.theta) * cos(down.phi) + sin(left.theta) * cos(left.phi) + sin(right.theta) * cos(right.phi) + sin(front.theta) * cos(front.phi) + sin(back.theta) * cos(back.phi));
-		H_d[i].y += Hex * (sin(up.theta) * sin(up.phi) + sin(down.theta) * sin(down.phi) + sin(left.theta) * sin(left.phi) + sin(right.theta) * sin(right.phi) + sin(front.theta) * sin(front.phi) + sin(back.theta) * sin(back.phi)); 
-		H_d[i].z += Hex * (cos(up.theta) + cos(down.theta) + cos(left.theta) + cos(right.theta) + cos(front.theta) + cos(back.theta));
+		H_t.x += Hex * (sin(up.theta) * cos(up.phi) + sin(down.theta) * cos(down.phi) + sin(left.theta) * cos(left.phi) + sin(right.theta) * cos(right.phi) + sin(front.theta) * cos(front.phi) + sin(back.theta) * cos(back.phi));
+		H_t.y += Hex * (sin(up.theta) * sin(up.phi) + sin(down.theta) * sin(down.phi) + sin(left.theta) * sin(left.phi) + sin(right.theta) * sin(right.phi) + sin(front.theta) * sin(front.phi) + sin(back.theta) * sin(back.phi)); 
+		H_t.z += Hex * (cos(up.theta) + cos(down.theta) + cos(left.theta) + cos(right.theta) + cos(front.theta) + cos(back.theta));
+
+		//__syncthreads();
+		H_d[i] = H_t;
 	}
+}
+
+//Shamelessly copied from Numerical Recipes
+/*
+Given values for the variables y[1..n] and their derivatives dydx[1..n] known at x , use the
+fourth-order Runge-Kutta method to advance the solution over an interval h and return the
+incremented variables as yout[1..n] , which need not be a distinct array from y . The user
+supplies the routine derivs(x,y,dydx) , which returns derivatives dydx at x .
+*/
+void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVector yout[], void (*derivs)(double, SphVector[], SphVector[], int, Vector[]), bool CopyToHost) {
+	double xh, hh, h6; 
+	dim3 blockDim(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+        dim3 gridDim(ceil(WIDTH/BLOCK_SIZE), ceil(HEIGHT/BLOCK_SIZE), ceil(DEPTH/BLOCK_SIZE));	
+
+	//device arrays
+	SphVector *dym_d, *dyt_d, *yt_d;
+
+	//allocate device arrays
+	cudaMalloc((void **)&dym_d, sizeof(SphVector) * n);
+	cudaMalloc((void **)&dyt_d, sizeof(SphVector) * n);
+	cudaMalloc((void **)&yt_d, sizeof(SphVector) * n);
+
+	hh = h * 0.5;
+	h6 = h / 6.0;
+	xh = x + hh;
+
+	//First step
+	rk4First<<<ceil(n/512.0), 512>>>(yt_d, y_d, dydx_d, hh, n);
+
+	//Second step
+	computeField<<<gridDim, blockDim>>>(H_d, H, Htherm_d, yt_d, n); 
+	(*derivs)<<<ceil(n/512.0), 512>>>(xh, yt_d, dyt_d, n, H_d);
+	rk4Second<<<ceil(n/512.0), 512>>>(yt_d, y_d, dyt_d, hh, n);
+
+	//Third step
+	computeField<<<gridDim, blockDim>>>(H_d, H, Htherm_d, yt_d, n); 
+	(*derivs)<<<ceil(n/512.0), 512>>>(xh, yt_d, dym_d, n, H_d);
+	rk4Third<<<ceil(n/512.0), 512>>>(yt_d, y_d, dym_d, dyt_d, h, n);
+
+	//Fourth step
+	computeField<<<gridDim, blockDim>>>(H_d, H, Htherm_d, yt_d, n); 
+	(*derivs)<<<ceil(n/512.0), 512>>>(x + h, yt_d, dyt_d, n, H_d);
+	//Accumulate increments with proper weights
+	rk4Fourth<<<ceil(n/512.0), 512>>>(yout_d, y_d, dydx_d, dyt_d, dym_d, h6, n);
+
+	//Copy yout to host
+	if(CopyToHost)
+		cudaMemcpy(yout, yout_d, sizeof(SphVector) * n, cudaMemcpyDeviceToHost);
+	
+	//Free device arrays
+	cudaFree(yt_d);
+	cudaFree(dyt_d);
+	cudaFree(dym_d);
+	//cudaFree(yout_d);
+}
+
+__global__ void computeHtherm(Vector * Htherm_d, int nvar, curandStateXORWOW_t * state) {
+		int i = threadIdx.x + blockDim.x * blockIdx.x;
+
+		if(i < nvar) {
+			//the field from random thermal motion
+			double vol = ALEN * ALEN * ALEN;
+			double sd = (1e9) * sqrt((2 * BOLTZ * TEMP * ALPHA)/(GAMMA * vol * MSAT * TIMESTEP)); //time has units of s here
+
+			double thermX = sd * curand_normal_double(&state[i]); 
+			double thermY = sd * curand_normal_double(&state[i]);
+			double thermZ = sd * curand_normal_double(&state[i]);
+
+			Htherm_d[i].x += thermX;
+			Htherm_d[i].y += thermY;
+			Htherm_d[i].z += thermZ;
+		}
 }
 
 __global__ void mDot(double t, SphVector M[], SphVector dMdt[], int nvar, Vector H[]) {
@@ -258,7 +279,10 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	cudaMalloc((void **)&v_d, sizeof(SphVector) * nvar);
 	cudaMalloc((void **)&dv_d, sizeof(SphVector) * nvar);
 	cudaMalloc((void **)&H_d, sizeof(SphVector) * nvar);
-	
+
+	//allocate device memory for thermal motion
+	cudaMalloc((void **)&Htherm_d, sizeof(Vector) * nvar);
+
 	for (int i = 0;i < nvar;i++) { 
 		v[i] = vstart[i];
 		y[i][0] = v[i]; 
@@ -280,8 +304,11 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 			yout_d = t_d;
 		}
 
+		//Generate thermal noise
+		computeHtherm<<<ceil(nvar/512.0), 512>>>(Htherm_d, nvar, state);
+
 		//Launch kernel to compute H field
-		computeField<<<gridDim, blockDim>>>(H_d, H, v_d, nvar, state); 
+		computeField<<<gridDim, blockDim>>>(H_d, H, Htherm_d, v_d, nvar); 
 
 		//Launch kernel to compute derivatives
 		(*derivs)<<<ceil(nvar/512.0), 512>>>(x, v_d, dv_d, nvar, H_d);
@@ -307,6 +334,7 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	cudaFree(v_d);
 	cudaFree(dv_d);
 	cudaFree(H_d);
+	cudaFree(Htherm_d);
 }
 
 int main(int argc, char *argv[]) {
