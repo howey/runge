@@ -164,7 +164,9 @@ __global__ void computeField(Vector * H_d, Vector H, Vector * Htherm_d, SphVecto
 		H_t.z += Hex * (cos(up.theta) + cos(down.theta) + cos(left.theta) + cos(right.theta) + cos(front.theta) + cos(back.theta));
 
 		//Scale field to avoid round-off errors
-		H_t /= ((2.0 * KANIS) / MSAT);
+		H_t.x /= ((2.0 * KANIS) / MSAT);
+		H_t.y /= ((2.0 * KANIS) / MSAT);
+		H_t.z /= ((2.0 * KANIS) / MSAT);
 		H_d[i] = H_t;
 	}
 }
