@@ -240,9 +240,9 @@ __global__ void computeHtherm(Vector * Htherm_d, int nvar, curandStateXORWOW_t *
 			double thermY = sd * curand_normal_double(&state[i]);
 			double thermZ = sd * curand_normal_double(&state[i]);
 
-			Htherm_d[i].x += thermX;
-			Htherm_d[i].y += thermY;
-			Htherm_d[i].z += thermZ;
+			Htherm_d[i].x = thermX;
+			Htherm_d[i].y = thermY;
+			Htherm_d[i].z = thermZ;
 		}
 }
 
