@@ -163,10 +163,6 @@ __global__ void computeField(Vector * H_d, Vector H, Vector * Htherm_d, SphVecto
 		H_t.y += Hex * (sin(up.theta) * sin(up.phi) + sin(down.theta) * sin(down.phi) + sin(left.theta) * sin(left.phi) + sin(right.theta) * sin(right.phi) + sin(front.theta) * sin(front.phi) + sin(back.theta) * sin(back.phi)); 
 		H_t.z += Hex * (cos(up.theta) + cos(down.theta) + cos(left.theta) + cos(right.theta) + cos(front.theta) + cos(back.theta));
 
-		//Scale field to avoid round-off errors
-		H_t.x /= ((2.0 * KANIS) / MSAT);
-		H_t.y /= ((2.0 * KANIS) / MSAT);
-		H_t.z /= ((2.0 * KANIS) / MSAT);
 		H_d[i] = H_t;
 	}
 }
@@ -253,6 +249,11 @@ __global__ void mDot(double t, SphVector M[], SphVector dMdt[], int nvar, Vector
 	if(i < nvar) {
 		SphVector M_s = M[i];
 		Vector H_s = H[i];
+
+		//Scale field to avoid round-off errors
+		H_s.x /= ((2.0 * KANIS) / MSAT);
+		H_s.y /= ((2.0 * KANIS) / MSAT);
+		H_s.z /= ((2.0 * KANIS) / MSAT);
 
 		dMdt[i].r = 0;
 		dMdt[i].phi = GAMMA * ((cos(M_s.theta) * sin(M_s.phi) * H_s.y) / sin(M_s.theta) + (cos(M_s.theta) * cos(M_s.phi) * H_s.x) / sin(M_s.theta) - H_s.z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(M_s.phi) * H_s.y) / sin(M_s.theta) - (sin(M_s.phi) * H_s.x) / sin(M_s.theta));
