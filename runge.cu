@@ -34,40 +34,72 @@ __global__ void initializeRandom(curandStateXORWOW_t * state, int nvar, unsigned
 __global__ void rk4First(SphVector *yt_d, SphVector *y_d, SphVector * dydx_d, double hh, int n) {
 	//TODO: Use shared memory
 	int i = threadIdx.x + blockIdx.x * blockDim.x;
+	SphVector y_s, dydx_s, yt_s;
+
 	if(i < n) {
-		yt_d[i].r = y_d[i].r + hh * dydx_d[i].r;
-		yt_d[i].phi = y_d[i].phi + hh * dydx_d[i].phi;
-		yt_d[i].theta = y_d[i].theta + hh * dydx_d[i].theta;
+		y_s = y_d[i];
+		dydx_s = dydx_d[i];
+
+		yt_s.r = y_s.r + hh * dydx_s.r;
+		yt_s.phi = y_s.phi + hh * dydx_s.phi;
+		yt_s.theta = y_s.theta + hh * dydx_s.theta;
+	
+		yt_d[i] = yt_s;
 	}
 }
 
 __global__ void rk4Second(SphVector *yt_d, SphVector *y_d, SphVector *dyt_d, double hh, int n) {
 	int i = threadIdx.x + blockIdx.x * blockDim.x;
+	SphVector y_s, dyt_s, yt_s;
+
 	if(i < n) {
-		yt_d[i].r = y_d[i].r + hh * dyt_d[i].r;
-		yt_d[i].phi = y_d[i].phi + hh * dyt_d[i].phi;
-		yt_d[i].theta = y_d[i].theta + hh * dyt_d[i].theta;
+		y_s = y_d[i];
+		dyt_s = dyt_d[i];
+
+		yt_s.r = y_s.r + hh * dyt_s.r;
+		yt_s.phi = y_s.phi + hh * dyt_s.phi;
+		yt_s.theta = y_s.theta + hh * dyt_s.theta;
+
+		yt_d[i] = yt_s;
 	}
 }
 
 __global__ void rk4Third(SphVector *yt_d, SphVector *y_d, SphVector *dym_d, SphVector * dyt_d, double h, int n) {
 	int i = threadIdx.x + blockIdx.x * blockDim.x;
+	SphVector y_s, dym_s, dyt_s, yt_s;
+
 	if(i < n) {
-		yt_d[i].r = y_d[i].r + h * dym_d[i].r;
-		dym_d[i].r += dyt_d[i].r;
-		yt_d[i].phi = y_d[i].phi + h * dym_d[i].phi;
-		dym_d[i].phi += dyt_d[i].phi;
-		yt_d[i].theta = y_d[i].theta + h * dym_d[i].theta;
-		dym_d[i].theta += dyt_d[i].theta;
+		y_s = y_d[i];
+		dym_s = dym_d[i];
+		dyt_s = dyt_d[i];
+
+		yt_s.r = y_s.r + h * dym_s.r;
+		dym_s.r += dyt_s.r;
+		yt_s.phi = y_s.phi + h * dym_s.phi;
+		dym_s.phi += dyt_s.phi;
+		yt_s.theta = y_s.theta + h * dym_s.theta;
+		dym_s.theta += dyt_s.theta;
+
+		yt_d[i] = yt_s;
+		dym_d[i] = dym_s;
 	}
 }
 
 __global__ void rk4Fourth(SphVector *yout_d, SphVector *y_d, SphVector *dydx_d, SphVector *dyt_d, SphVector *dym_d, double h6, int n) {
 	int i = threadIdx.x + blockIdx.x * blockDim.x;
+	SphVector y_s, dydx_s, dyt_s, dym_s, yout_s;
+
 	if(i < n) {
-		yout_d[i].r = y_d[i].r + h6 * (dydx_d[i].r + dyt_d[i].r + 2.0 * dym_d[i].r);
-		yout_d[i].phi = y_d[i].phi + h6 * (dydx_d[i].phi + dyt_d[i].phi + 2.0 * dym_d[i].phi);
-		yout_d[i].theta = y_d[i].theta + h6 * (dydx_d[i].theta + dyt_d[i].theta + 2.0 * dym_d[i].theta);
+		y_s = y_d[i];
+		dydx_s = dydx_d[i];
+		dyt_s = dyt_d[i];
+		dym_s = dym_d[i];
+		
+		yout_s.r = y_s.r + h6 * (dydx_s.r + dyt_s.r + 2.0 * dym_s.r);
+		yout_s.phi = y_s.phi + h6 * (dydx_s.phi + dyt_s.phi + 2.0 * dym_s.phi);
+		yout_s.theta = y_s.theta + h6 * (dydx_s.theta + dyt_s.theta + 2.0 * dym_s.theta);
+	
+		yout_d[i] = yout_s;
 	}
 }
 
@@ -102,9 +134,12 @@ __global__ void computeField(Vector * H_d, Vector H, Vector * Htherm_d, SphVecto
 		H_t.z += (1/M_s[threadIdx.z][threadIdx.y][threadIdx.x].r) * 2 * KANIS * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta);
 
 		//the field from random thermal motion
-		H_t.x += Htherm_d[i].x;
-		H_t.y += Htherm_d[i].y;
-		H_t.z += Htherm_d[i].z;
+		Vector Htherm_s;
+		Htherm_s = Htherm_d[i];
+
+		H_t.x += Htherm_s.x;
+		H_t.y += Htherm_s.y;
+		H_t.z += Htherm_s.z;
 
 		//the exchange field
 		SphVector up, down, left, right, front, back;
@@ -236,9 +271,13 @@ __global__ void computeHtherm(Vector * Htherm_d, int nvar, curandStateXORWOW_t *
 			double thermY = sd * curand_normal_double(&state[i]);
 			double thermZ = sd * curand_normal_double(&state[i]);
 
-			Htherm_d[i].x = thermX;
-			Htherm_d[i].y = thermY;
-			Htherm_d[i].z = thermZ;
+			Vector Htherm_s;
+
+			Htherm_s.x = thermX;
+			Htherm_s.y = thermY;
+			Htherm_s.z = thermZ;
+		
+			Htherm_d[i] = Htherm_s;
 		}
 }
 
@@ -247,7 +286,7 @@ __global__ void mDot(double t, SphVector M[], SphVector dMdt[], int nvar, Vector
 
 	//Compute derivative
 	if(i < nvar) {
-		SphVector M_s = M[i];
+		SphVector M_s = M[i], dMdt_s;
 		Vector H_s = H[i];
 
 		//Scale field to avoid round-off errors
@@ -255,9 +294,11 @@ __global__ void mDot(double t, SphVector M[], SphVector dMdt[], int nvar, Vector
 		H_s.y /= ((2.0 * KANIS) / MSAT);
 		H_s.z /= ((2.0 * KANIS) / MSAT);
 
-		dMdt[i].r = 0;
-		dMdt[i].phi = GAMMA * ((cos(M_s.theta) * sin(M_s.phi) * H_s.y) / sin(M_s.theta) + (cos(M_s.theta) * cos(M_s.phi) * H_s.x) / sin(M_s.theta) - H_s.z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(M_s.phi) * H_s.y) / sin(M_s.theta) - (sin(M_s.phi) * H_s.x) / sin(M_s.theta));
-		dMdt[i].theta = -GAMMA * (cos(M_s.phi) * H_s.y - sin(M_s.phi) * H_s.x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(M_s.theta) * cos(M_s.phi) * H_s.x - H_s.z * sin(M_s.theta) + cos(M_s.theta) * sin(M_s.phi) * H_s.y);
+		dMdt_s.r = 0;
+		dMdt_s.phi = GAMMA * ((cos(M_s.theta) * sin(M_s.phi) * H_s.y) / sin(M_s.theta) + (cos(M_s.theta) * cos(M_s.phi) * H_s.x) / sin(M_s.theta) - H_s.z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(M_s.phi) * H_s.y) / sin(M_s.theta) - (sin(M_s.phi) * H_s.x) / sin(M_s.theta));
+		dMdt_s.theta = -GAMMA * (cos(M_s.phi) * H_s.y - sin(M_s.phi) * H_s.x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(M_s.theta) * cos(M_s.phi) * H_s.x - H_s.z * sin(M_s.theta) + cos(M_s.theta) * sin(M_s.phi) * H_s.y);
+	
+		dMdt[i] = dMdt_s;
 	}
 }
 
