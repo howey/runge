@@ -18,68 +18,7 @@ static double *xx;
 static SphVector **y;
 static Vector *H;
 static Vector Happl;
-
-//Shamelessly copied from Numerical Recipes
-/*
-Given values for the variables y[1..n] and their derivatives dydx[1..n] known at x , use the
-fourth-order Runge-Kutta method to advance the solution over an interval h and return the
-incremented variables as yout[1..n] , which need not be a distinct array from y . The user
-supplies the routine derivs(x,y,dydx) , which returns derivatives dydx at x .
-*/
-void rk4(SphVector y[], SphVector dydx[], int n, double x, double h, SphVector yout[], void (*derivs)(double, SphVector[], SphVector[], int, Vector[])) {
-	double xh, hh, h6; 
-	SphVector *dym, *dyt, *yt;
-
-	dym = (SphVector *)malloc(sizeof(SphVector) * n);
-	dyt = (SphVector *)malloc(sizeof(SphVector) * n);
-	yt = (SphVector *)malloc(sizeof(SphVector) * n);
-
-	hh = h * 0.5;
-	h6 = h / 6.0;
-	xh = x + hh;
-
-	//First step
-	for (int i = 0; i < n; i++) {
-		//yt[i] = y[i] + hh * dydx[i];
-		yt[i].r = y[i].r + hh * dydx[i].r;
-		yt[i].phi = y[i].phi + hh * dydx[i].phi;
-		yt[i].theta = y[i].theta + hh * dydx[i].theta;
-	}
-	//Second step
-	(*derivs)(xh, yt, dyt, n, H);
-	for (int i = 0; i < n; i++) {
-		//yt[i] = y[i] + hh * dyt[i];
-		yt[i].r = y[i].r + hh * dyt[i].r;
-		yt[i].phi = y[i].phi + hh * dyt[i].phi;
-		yt[i].theta = y[i].theta + hh * dyt[i].theta;
-	}
-	//Third step
-	(*derivs)(xh, yt, dym, n, H);
-	for (int i = 0; i < n; i++) {
-		//yt[i] = y[i] + h * dym[i];
-		//dym[i] += dyt[i];
-		yt[i].r = y[i].r + h * dym[i].r;
-		dym[i].r += dyt[i].r;
-		yt[i].phi = y[i].phi + h * dym[i].phi;
-		dym[i].phi += dyt[i].phi;
-		yt[i].theta = y[i].theta + h * dym[i].theta;
-		dym[i].theta += dyt[i].theta;
-	}
-	//Fourth step
-	(*derivs)(x + h, yt, dyt, n, H);
-	//Accumulate increments with proper weights
-	for (int i = 0; i < n; i++) {
-		//yout[i] = y[i] + h6 * (dydx[i] + dyt[i] + 2.0 * dym[i]);
-		yout[i].r = y[i].r + h6 * (dydx[i].r + dyt[i].r + 2.0 * dym[i].r);
-		yout[i].phi = y[i].phi + h6 * (dydx[i].phi + dyt[i].phi + 2.0 * dym[i].phi);
-		yout[i].theta = y[i].theta + h6 * (dydx[i].theta + dyt[i].theta + 2.0 * dym[i].theta);
-	}
-
-	
-	free(yt);
-	free(dyt);
-	free(dym);
-}
+static Vector * Htherm;
 
 //Computes the local applied field for every atom of moment M. The global applied field is passed in as Happl. 
 void computeField(Vector * H, Vector Happl, const SphVector * M, int nvar) {
@@ -95,16 +34,9 @@ void computeField(Vector * H, Vector Happl, const SphVector * M, int nvar) {
 		H[i].z += (1/M[i].r) * 2 * KANIS * cos(M[i].theta) * sin(M[i].theta) * sin(M[i].theta);
 
 		//the field from random thermal motion
-		double vol = ALEN * ALEN * ALEN;
-		double sd = (1e9) * sqrt((2 * BOLTZ * TEMP * ALPHA)/(GAMMA * vol * MSAT * TIMESTEP)); //time has units of s here
-
-		double thermX = gaussian(0, sd); 
-		double thermY = gaussian(0, sd); 
-		double thermZ = gaussian(0, sd); 
-
-		H[i].x += thermX;
-		H[i].y += thermY;
-		H[i].z += thermZ;
+		H[i].x += Htherm[i].x;
+		H[i].y += Htherm[i].y;
+		H[i].z += Htherm[i].z;
 
 		//the exchange field
 		SphVector up, down, left, right, front, back;
@@ -139,7 +71,7 @@ void computeField(Vector * H, Vector Happl, const SphVector * M, int nvar) {
 		else
 			back = M[i + (WIDTH * HEIGHT)];
 		
-		double Hex = JEX / (MSAT * ALEN * ALEN);
+		double Hex = 2.0 * JEX / (MSAT * ALEN * ALEN);
 
 		H[i].x += Hex * (sin(up.theta) * cos(up.phi) + sin(down.theta) * cos(down.phi) + sin(left.theta) * cos(left.phi) + sin(right.theta) * cos(right.phi) + sin(front.theta) * cos(front.phi) + sin(back.theta) * cos(back.phi));
 		H[i].y += Hex * (sin(up.theta) * sin(up.phi) + sin(down.theta) * sin(down.phi) + sin(left.theta) * sin(left.phi) + sin(right.theta) * sin(right.phi) + sin(front.theta) * sin(front.phi) + sin(back.theta) * sin(back.phi)); 
@@ -147,13 +79,89 @@ void computeField(Vector * H, Vector Happl, const SphVector * M, int nvar) {
 	}
 }
 
+//Shamelessly copied from Numerical Recipes
+/*
+Given values for the variables y[1..n] and their derivatives dydx[1..n] known at x , use the
+fourth-order Runge-Kutta method to advance the solution over an interval h and return the
+incremented variables as yout[1..n] , which need not be a distinct array from y . The user
+supplies the routine derivs(x,y,dydx) , which returns derivatives dydx at x .
+*/
+void rk4(SphVector y[], SphVector dydx[], int n, double x, double h, SphVector yout[], void (*derivs)(double, SphVector[], SphVector[], int, Vector[])) {
+	double xh, hh, h6; 
+	SphVector *dym, *dyt, *yt;
+
+	dym = (SphVector *)malloc(sizeof(SphVector) * n);
+	dyt = (SphVector *)malloc(sizeof(SphVector) * n);
+	yt = (SphVector *)malloc(sizeof(SphVector) * n);
+
+	//Scale field and time to avoid roundoff errors
+	double scale = (2.0 * KANIS / MSAT);
+	h *= scale;
+
+	hh = h * 0.5;
+	h6 = h / 6.0;
+	xh = x + hh;
+
+	//First step
+	for (int i = 0; i < n; i++) {
+		//yt[i] = y[i] + hh * dydx[i];
+		yt[i].r = y[i].r + hh * dydx[i].r;
+		yt[i].phi = y[i].phi + hh * dydx[i].phi;
+		yt[i].theta = y[i].theta + hh * dydx[i].theta;
+	}
+	//Second step
+	computeField(H, Happl, yt, n);	
+	(*derivs)(xh, yt, dyt, n, H);
+	for (int i = 0; i < n; i++) {
+		//yt[i] = y[i] + hh * dyt[i];
+		yt[i].r = y[i].r + hh * dyt[i].r;
+		yt[i].phi = y[i].phi + hh * dyt[i].phi;
+		yt[i].theta = y[i].theta + hh * dyt[i].theta;
+	}
+	//Third step
+	computeField(H, Happl, yt, n);	
+	(*derivs)(xh, yt, dym, n, H);
+	for (int i = 0; i < n; i++) {
+		//yt[i] = y[i] + h * dym[i];
+		//dym[i] += dyt[i];
+		yt[i].r = y[i].r + h * dym[i].r;
+		dym[i].r += dyt[i].r;
+		yt[i].phi = y[i].phi + h * dym[i].phi;
+		dym[i].phi += dyt[i].phi;
+		yt[i].theta = y[i].theta + h * dym[i].theta;
+		dym[i].theta += dyt[i].theta;
+	}
+	//Fourth step
+	computeField(H, Happl, yt, n);	
+	(*derivs)(x + h, yt, dyt, n, H);
+	//Accumulate increments with proper weights
+	for (int i = 0; i < n; i++) {
+		//yout[i] = y[i] + h6 * (dydx[i] + dyt[i] + 2.0 * dym[i]);
+		yout[i].r = y[i].r + h6 * (dydx[i].r + dyt[i].r + 2.0 * dym[i].r);
+		yout[i].phi = y[i].phi + h6 * (dydx[i].phi + dyt[i].phi + 2.0 * dym[i].phi);
+		yout[i].theta = y[i].theta + h6 * (dydx[i].theta + dyt[i].theta + 2.0 * dym[i].theta);
+	}
+
+	
+	free(yt);
+	free(dyt);
+	free(dym);
+}
+
 void mDot(double t, SphVector M[], SphVector dMdt[], int nvar, Vector H[]) {
 
 	//Compute derivative
 	for(int i = 0; i < nvar; i++) {
+		//Scale field to avoid roundoff errors
+		double scale = (2.0 * KANIS / MSAT);
+		Vector Hsc = H[i];
+		Hsc.x /= scale;
+		Hsc.y /= scale;
+		Hsc.z /= scale;
+
 		dMdt[i].r = 0;
-		dMdt[i].phi = GAMMA * ((cos(M[i].theta) * sin(M[i].phi) * H[i].y) / sin(M[i].theta) + (cos(M[i].theta) * cos(M[i].phi) * H[i].x) / sin(M[i].theta) - H[i].z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(M[i].phi) * H[i].y) / sin(M[i].theta) - (sin(M[i].phi) * H[i].x) / sin(M[i].theta));
-		dMdt[i].theta = -GAMMA * (cos(M[i].phi) * H[i].y - sin(M[i].phi) * H[i].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(M[i].theta) * cos(M[i].phi) * H[i].x - H[i].z * sin(M[i].theta) + cos(M[i].theta) * sin(M[i].phi) * H[i].y);
+		dMdt[i].phi = GAMMA * ((cos(M[i].theta) * sin(M[i].phi) * Hsc.y) / sin(M[i].theta) + (cos(M[i].theta) * cos(M[i].phi) * Hsc.x) / sin(M[i].theta) - Hsc.z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(M[i].phi) * Hsc.y) / sin(M[i].theta) - (sin(M[i].phi) * Hsc.x) / sin(M[i].theta));
+		dMdt[i].theta = -GAMMA * (cos(M[i].phi) * Hsc.y - sin(M[i].phi) * Hsc.x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(M[i].theta) * cos(M[i].phi) * Hsc.x - Hsc.z * sin(M[i].theta) + cos(M[i].theta) * sin(M[i].phi) * Hsc.y);
 	}
 }
 
@@ -171,6 +179,7 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	vout = (SphVector *)malloc(sizeof(SphVector) * nvar);
 	dv = (SphVector *)malloc(sizeof(SphVector) * nvar);
 	H = (Vector *)malloc(sizeof(Vector) * nvar);
+	Htherm = (Vector *)malloc(sizeof(Vector) * nvar);
 
 	for (int i = 0;i < nvar;i++) { 
 		v[i] = vstart[i];
@@ -182,6 +191,20 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	h = (x2-x1)/nstep;
 
 	for (int k = 0; k < nstep; k++) {
+
+		for(int j = 0; j < nstep; j++) {
+			//the field from random thermal motion
+			double vol = ALEN * ALEN * ALEN;
+			double sd = (1e9) * sqrt((2 * BOLTZ * TEMP * ALPHA)/(GAMMA * vol * MSAT * TIMESTEP)); //time has units of s here
+
+			double thermX = gaussian(0, sd); 
+			double thermY = gaussian(0, sd); 
+			double thermZ = gaussian(0, sd); 
+
+			Htherm[j].x = thermX; 
+			Htherm[j].y = thermY;
+			Htherm[j].z = thermZ;
+		}
 
 		//Compute H field
 		computeField(H, Happl, v, nvar);	
@@ -199,6 +222,7 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 		}
 	}
 
+	free(Htherm);
 	free(H);
 	free(dv);
 	free(vout);
@@ -223,7 +247,7 @@ int main(int argc, char *argv[]) {
 		printf("error opening file: times.txt\n");
 		return 1;
 	}
-	fprintf(times, "Time to simulate %fns\n");
+	fprintf(times, "Time to simulate %fns\n", FIELDTIMESTEP);
 	#endif
 
 	//seed random number generator
