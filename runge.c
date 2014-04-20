@@ -192,7 +192,7 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 
 	for (int k = 0; k < nstep; k++) {
 
-		for(int j = 0; j < nstep; j++) {
+		for(int j = 0; j < nvar; j++) {
 			//the field from random thermal motion
 			double vol = ALEN * ALEN * ALEN;
 			double sd = (1e9) * sqrt((2 * BOLTZ * TEMP * ALPHA)/(GAMMA * vol * MSAT * TIMESTEP)); //time has units of s here
