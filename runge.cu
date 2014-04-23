@@ -1,19 +1,27 @@
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <string.h>
+
 #include <curand_kernel.h>
 #include "runge.h"
 
 /* Time is in units of ns */
 static const double ALPHA = 0.02; //dimensionless
 static const double GAMMA = 1.76e-2; //(Oe*ns)^-1
-static const double KANIS = 7.0e7; //erg*cm^-3
+static const double KANIS = 4.4e7; //erg*cm^-3
 static const double TIMESTEP = (1e-7); //ns, the integrator timestep
 static const double MSAT = 1100.0; //emu*cm^-3
 static const double JEX = 1.1e-6; //erg*cm^-1
 static const double ALEN = 3e-8; //cm
-static const double TEMP = 300.0; //K
+static const double TEMPAMB = 300.0; //K, the ambient temperature
 static const double BOLTZ = 1.38e-34; //g*cm^2*ns^-2*K^-1
-static const double FIELDSTEP = 500.0; //Oe, the change in the applied field
-static const double FIELDTIMESTEP = 0.1; //ns, time to wait before changing applied field
-static const double FIELDRANGE = 130000.0; //Oe, create loop from FIELDRANGE to -FIELDRANGE Oe
+//static const double FIELDSTEP = 500.0; //Oe, the change in the applied field
+//static const double FIELDTIMESTEP = 0.1; //ns, time to wait before changing applied field
+//static const double FIELDRANGE = 130000.0; //Oe, create loop from FIELDRANGE to -FIELDRANGE Oe
+static const double TPULSE = 1.269; //ns, the duration of the laser pulse
+static const double TAU = 0.0551197; //ns, the time constant of the laser heating
+static const double TEMPDELTA = 400.0; //K, the change in temperature produced by laser
 
 static double *xx;
 static SphVector **y;
@@ -24,6 +32,7 @@ static SphVector *yout_d;
 static curandStateXORWOW_t *state;
 static SphVector *dym_d, *dyt_d, *yt_d;
 static SphVector *v_d, *dv_d;
+static FILE * output;
 
 __global__ void initializeRandom(curandStateXORWOW_t * state, int nvar, unsigned long long seed) {
 	//the thread id
@@ -251,13 +260,13 @@ void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVect
 	//cudaFree(yout_d);
 }
 
-__global__ void computeHtherm(Vector * Htherm_d, int nvar, curandStateXORWOW_t * state) {
+__global__ void computeHtherm(Vector * Htherm_d, int nvar, curandStateXORWOW_t * state, double temp) {
 		int i = threadIdx.x + blockDim.x * blockIdx.x;
 
 		if(i < nvar) {
 			//the field from random thermal motion
 			double vol = ALEN * ALEN * ALEN;
-			double sd = (1e9) * sqrt((2 * BOLTZ * TEMP * ALPHA)/(GAMMA * vol * MSAT * TIMESTEP)); //time has units of s here
+			double sd = (1e9) * sqrt((2 * BOLTZ * temp * ALPHA)/(GAMMA * vol * MSAT * TIMESTEP)); //time has units of s here
 
 			double thermX = sd * curand_normal_double(&state[i]); 
 			double thermY = sd * curand_normal_double(&state[i]);
@@ -301,18 +310,14 @@ evaluates derivatives. Results are stored in the global variables y[0..nvar-1][0
 and xx[0..nstep].
 */
 void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void (*derivs)(double, SphVector[], SphVector[], int, Vector[])) {
-	double x, h;
+	double x, h, temp = TEMPAMB;
 	dim3 blockDim(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
         dim3 gridDim(ceil((float)WIDTH/(float)BLOCK_SIZE), ceil((float)HEIGHT/(float)BLOCK_SIZE), ceil((float)DEPTH/(float)BLOCK_SIZE));	
 	SphVector *v, *vout, *dv;
 
-	//device arrays
-
 	v = (SphVector *)malloc(sizeof(SphVector) * nvar);
 	vout = (SphVector *)malloc(sizeof(SphVector) * nvar);
 	dv = (SphVector *)malloc(sizeof(SphVector) * nvar);
-
-
 
 	for (int i = 0;i < nvar;i++) { 
 		v[i] = vstart[i];
@@ -325,6 +330,22 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 
 	for (int k = 0; k < nstep; k++) {
 
+		if(!(k % 1000)) {
+			double t = x1 + k * TIMESTEP;
+			if(t <= TPULSE) {
+				double g = 1 - exp(-t/TAU);
+				temp = TEMPAMB + TEMPDELTA * g;
+			}
+			else if(t > TPULSE) {
+				double g = exp(-(t - TPULSE)/TAU);
+				temp = TEMPAMB + TEMPDELTA * g;
+			}
+		}
+
+		if(k == 0){
+			fprintf(output, "%f\t", temp);
+		}
+
 		//Copy memory to device
 		//After the first timestep, the value of v and yout_d are the same. d2d memcpy is much faster than h2s, so do it instead
 		if(k == 0) cudaMemcpy(v_d, v, sizeof(SphVector) * nvar, cudaMemcpyHostToDevice);
@@ -336,7 +357,7 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 		}
 
 		//Generate thermal noise
-		computeHtherm<<<ceil(nvar/512.0), 512>>>(Htherm_d, nvar, state);
+		computeHtherm<<<ceil(nvar/512.0), 512>>>(Htherm_d, nvar, state, temp);
 
 		//Launch kernel to compute H field
 		computeField<<<gridDim, blockDim>>>(H_d, H, Htherm_d, v_d, nvar); 
@@ -369,10 +390,21 @@ int main(int argc, char *argv[]) {
 	double endTime;
 	SphVector vstart[nvar]; 
 
-	FILE * output = fopen("output.txt", "w");
-	if(output == NULL) {
-		printf("error opening file\n");
-		return 0;
+	char fileName[128] = {0};
+	char * jobId = getenv("PBS_JOBID");
+	strcpy(fileName, jobId);
+
+	//Check if a file named fileName already exists, needed for two-GPU jobs
+	struct stat buffer;
+	int fd = stat(fileName, &buffer);
+	if(fd < 0) {
+		//file doesn't exist
+		output = fopen(fileName, "w");
+	}
+	else {
+		//file exists
+		strcat(fileName, "-1");
+		output = fopen(fileName, "w");
 	}
 
 	#if BENCHMARK
@@ -381,14 +413,13 @@ int main(int argc, char *argv[]) {
 		printf("error opening file: times.txt\n");
 		return 1;
 	}
-	fprintf(times, "Time to simulate %fns\n");
+	//fprintf(times, "Time to simulate %fns\n", FIELDTIMESTEP);
 	#endif
 
 	//Initialize random number generator
 	unsigned long long seed = time(NULL);
 	cudaMalloc((void **)&state, sizeof(curandStateXORWOW_t) * nvar);
 	initializeRandom<<<ceil(nvar/512.0), 512>>>(state, nvar, seed);
-
 	
 	//allocate device arrays
 	cudaMalloc((void **)&dym_d, sizeof(SphVector) * nvar);
@@ -406,12 +437,15 @@ int main(int argc, char *argv[]) {
 
 	for(int i = 0; i < nvar; i++) {	
 		vstart[i].r = MSAT;
-		vstart[i].theta = 0.01;
+		vstart[i].theta = 3.13;
 		vstart[i].phi = 0;
 	}
 
-	Vector Happl = {0.0, 0.0, FIELDRANGE};
-	endTime = FIELDTIMESTEP; 
+	//Vector Happl = {0.0, 0.0, FIELDRANGE};
+	Vector Happl = {0.0, 0.0, 0.5e4};	
+	//endTime = FIELDTIMESTEP; 
+	//endTime = 2.538;
+	endTime = 2.0 * TPULSE;
 	endTime /= 100; //Reduce host memory usage
 	nstep = ((int)ceil(endTime/TIMESTEP));
 
@@ -421,34 +455,24 @@ int main(int argc, char *argv[]) {
 		y[i] = (SphVector *)malloc(sizeof(SphVector) * (nstep + 1));
 	}
 
-	
-	bool isDecreasing = true;
-	for(int i = 0; i <= (4 * (int)(FIELDRANGE/FIELDSTEP)); i++) {
-		//Applied field
-		H.x = Happl.x;
-		H.y = Happl.y;
-		H.z = Happl.z;
+	//Applied field
+	H.x = Happl.x;
+	H.y = Happl.y;
+	H.z = Happl.z;
 
-		#if BENCHMARK
-		time_t start = time(NULL);
-		#endif
+	#if BENCHMARK
+	time_t start = time(NULL);
+	#endif
 
-		for(int j = 0; j < 100; j++) {
-			//Simulate!
-			rkdumb(vstart, nvar, endTime * j, endTime * (j + 1) - TIMESTEP, nstep, mDot); 
+	for(int j = 0; j < 100; j++) {
+		//Simulate!
+		rkdumb(vstart, nvar, endTime * j, endTime * (j + 1) - TIMESTEP, nstep, mDot); 
 
-			for(int i = 0; i < nvar; i++) {
-				vstart[i].r = y[i][nstep].r;
-				vstart[i].theta = y[i][nstep].theta;
-				vstart[i].phi = y[i][nstep].phi;
-			}
+		for(int i = 0; i < nvar; i++) {
+			vstart[i].r = y[i][nstep].r;
+			vstart[i].theta = y[i][nstep].theta;
+			vstart[i].phi = y[i][nstep].phi;
 		}
-	
-		#if BENCHMARK
-		time_t end = time(NULL);
-		fprintf(times, "%lds\n", (long)(end - start));
-		fflush(times);
-		#endif
 
 		double mag = 0.0;	
 		for(int k = 0; k < nvar; k++) {
@@ -456,13 +480,16 @@ int main(int argc, char *argv[]) {
 		}
 
 		mag /= (double)nvar;
-		fprintf(output, "%f\t%f\n", Happl.z, mag);
+		fprintf(output, "%f\t%f\n", endTime * (j + 1), mag);
 		fflush(output);
-
-		//Adjust applied field strength at endTime intervals	
-		if(Happl.z + FIELDRANGE < 1.0) isDecreasing = false;
-		isDecreasing ? (Happl.z -= FIELDSTEP) : (Happl.z += FIELDSTEP);
 	}
+
+	#if BENCHMARK
+	time_t end = time(NULL);
+	fprintf(times, "%lds\n", (long)(end - start));
+	fflush(times);
+	#endif
+
 	//Probably don't really need these since we're about to exit the program
 	free(xx);
 	free(y);
