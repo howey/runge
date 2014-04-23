@@ -22,6 +22,8 @@ static Vector *H_d;
 static Vector * Htherm_d;
 static SphVector *yout_d;
 static curandStateXORWOW_t *state;
+static SphVector *dym_d, *dyt_d, *yt_d;
+static SphVector *v_d, *dv_d;
 
 __global__ void initializeRandom(curandStateXORWOW_t * state, int nvar, unsigned long long seed) {
 	//the thread id
@@ -215,12 +217,6 @@ void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVect
         dim3 gridDim(ceil((float)WIDTH/(float)BLOCK_SIZE), ceil((float)HEIGHT/(float)BLOCK_SIZE), ceil((float)DEPTH/(float)BLOCK_SIZE));	
 
 	//device arrays
-	SphVector *dym_d, *dyt_d, *yt_d;
-
-	//allocate device arrays
-	cudaMalloc((void **)&dym_d, sizeof(SphVector) * n);
-	cudaMalloc((void **)&dyt_d, sizeof(SphVector) * n);
-	cudaMalloc((void **)&yt_d, sizeof(SphVector) * n);
 
 	//Scale field to avoid round-off errors
 	h *= ((2.0 * KANIS) / MSAT);
@@ -252,10 +248,6 @@ void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVect
 	if(CopyToHost)
 		cudaMemcpy(yout, yout_d, sizeof(SphVector) * n, cudaMemcpyDeviceToHost);
 	
-	//Free device arrays
-	cudaFree(yt_d);
-	cudaFree(dyt_d);
-	cudaFree(dym_d);
 	//cudaFree(yout_d);
 }
 
@@ -315,21 +307,12 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	SphVector *v, *vout, *dv;
 
 	//device arrays
-	SphVector *v_d, *dv_d;
 
 	v = (SphVector *)malloc(sizeof(SphVector) * nvar);
 	vout = (SphVector *)malloc(sizeof(SphVector) * nvar);
 	dv = (SphVector *)malloc(sizeof(SphVector) * nvar);
 
-	cudaMalloc((void **)&yout_d, sizeof(SphVector) * nvar);
 
-	//allocate device memory for mDot
-	cudaMalloc((void **)&v_d, sizeof(SphVector) * nvar);
-	cudaMalloc((void **)&dv_d, sizeof(SphVector) * nvar);
-	cudaMalloc((void **)&H_d, sizeof(SphVector) * nvar);
-
-	//allocate device memory for thermal motion
-	cudaMalloc((void **)&Htherm_d, sizeof(Vector) * nvar);
 
 	for (int i = 0;i < nvar;i++) { 
 		v[i] = vstart[i];
@@ -378,11 +361,6 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	free(dv);
 	free(vout);
 	free(v);
-	cudaFree(yout_d);
-	cudaFree(v_d);
-	cudaFree(dv_d);
-	cudaFree(H_d);
-	cudaFree(Htherm_d);
 }
 
 int main(int argc, char *argv[]) {
@@ -412,6 +390,20 @@ int main(int argc, char *argv[]) {
 	initializeRandom<<<ceil(nvar/512.0), 512>>>(state, nvar, seed);
 
 	
+	//allocate device arrays
+	cudaMalloc((void **)&dym_d, sizeof(SphVector) * nvar);
+	cudaMalloc((void **)&dyt_d, sizeof(SphVector) * nvar);
+	cudaMalloc((void **)&yt_d, sizeof(SphVector) * nvar);
+	cudaMalloc((void **)&yout_d, sizeof(SphVector) * nvar);
+
+	//allocate device memory for mDot
+	cudaMalloc((void **)&v_d, sizeof(SphVector) * nvar);
+	cudaMalloc((void **)&dv_d, sizeof(SphVector) * nvar);
+	cudaMalloc((void **)&H_d, sizeof(Vector) * nvar);
+
+	//allocate device memory for thermal motion
+	cudaMalloc((void **)&Htherm_d, sizeof(Vector) * nvar);
+
 	for(int i = 0; i < nvar; i++) {	
 		vstart[i].r = MSAT;
 		vstart[i].theta = 0.01;
@@ -475,5 +467,16 @@ int main(int argc, char *argv[]) {
 	free(xx);
 	free(y);
 	cudaFree(state);
+
+	//Free device arrays
+	cudaFree(yt_d);
+	cudaFree(dyt_d);
+	cudaFree(dym_d);
+	cudaFree(v_d);
+	cudaFree(dv_d);
+	cudaFree(H_d);
+	cudaFree(Htherm_d);
+	cudaFree(yout_d);
+
 	return 0;
 }
