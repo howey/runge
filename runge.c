@@ -259,7 +259,10 @@ int main(int argc, char *argv[]) {
 		vstart[i].phi = 0;
 	}
 
-	Vector Happl = {0.0, 0.0, FIELDRANGE};
+	Happl.x = 0.0;
+	Happl.y = 0.0;
+	Happl.z = FIELDRANGE;
+
 	endTime = FIELDTIMESTEP; 
 	endTime /= 100; //Reduce host memory usage
 	nstep = ((int)ceil(endTime/TIMESTEP));
