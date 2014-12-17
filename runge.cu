@@ -1,3 +1,8 @@
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <string.h>
+
 #include <curand_kernel.h>
 #include "runge.h"
 
@@ -15,22 +20,29 @@ inline void gpuAssert(cudaError_t code, char * file, int line, bool abort=true) 
 /* Time is in units of ns */
 static const double ALPHA = 0.02; //dimensionless
 static const double GAMMA = 1.76e-2; //(Oe*ns)^-1
-static const double KANIS = 7.0e7; //erg*cm^-3
+static const double KANIS = 4.4e7; //erg*cm^-3
 static const double TIMESTEP = (1e-7); //ns, the integrator timestep
 static const double MSAT = 1100.0; //emu*cm^-3
 static const double JEX = 1.1e-6; //erg*cm^-1
 static const double ALEN = 3e-8; //cm
-static const double TEMP = 0.0; //K
+static const double TEMPAMB = 300.0; //K, the ambient temperature
 static const double BOLTZ = 1.38e-34; //g*cm^2*ns^-2*K^-1
-static const double FIELDSTEP = 500.0; //Oe, the change in the applied field
-static const double FIELDTIMESTEP = 0.1; //ns, time to wait before changing applied field
-static const double FIELDRANGE = 130000.0; //Oe, create loop from FIELDRANGE to -FIELDRANGE Oe
+//static const double FIELDSTEP = 500.0; //Oe, the change in the applied field
+//static const double FIELDTIMESTEP = 0.1; //ns, time to wait before changing applied field
+//static const double FIELDRANGE = 130000.0; //Oe, create loop from FIELDRANGE to -FIELDRANGE Oe
+static const double TPULSE = 1.269; //ns, the duration of the laser pulse
+static const double TAU = 0.0551197; //ns, the time constant of the laser heating
+static const double TEMPDELTA = 400.0; //K, the change in temperature produced by laser
 
 static double *xx;
 static SphVector **y;
 static Vector H;
 static Vector *H_d;
+static Vector * Htherm_d;
 static curandStateXORWOW_t *state;
+static SphVector *dym_d, *dyt_d, *yt_d;
+static SphVector *v_d, *dv_d;
+static FILE * output;
 
 __global__ void initializeRandom(curandStateXORWOW_t * state, int nvar, unsigned long long seed) {
 	//the thread id
@@ -40,41 +52,53 @@ __global__ void initializeRandom(curandStateXORWOW_t * state, int nvar, unsigned
 	if(i < nvar)
 		curand_init(seed, i, 0, &state[i]);
 }
+	SphVector y_s, dydx_s, yt_s;
+
+		y_s = y_d[i];
+		dydx_s = dydx_d[i];
+
+		yt_s.r = y_s.r + hh * dydx_s.r;
+		yt_s.phi = y_s.phi + hh * dydx_s.phi;
+		yt_s.theta = y_s.theta + hh * dydx_s.theta;
+	
+		yt_d[i] = yt_s;
 
 //y_d, a pointer to the state at iteration n
 //H, the global applied field
-__global__ void rk4Kernel(SphVector * y_d, int n, double x, double h, SphVector * yout_d, Vector H, curandStateXORWOW_t * state) {
-	/* Declare shared memory for CUDA block.
+	SphVector y_s, dyt_s, yt_s;
+
 	   Since a halo element neighbors only one atom,
-	   halo elements are not loaded into shared memory.
-	   Instead, they are read from global memory as usual. */
-	__shared__ SphVector dym_d[BLOCK_SIZE][BLOCK_SIZE][BLOCK_SIZE];
-	__shared__ SphVector dyt_d[BLOCK_SIZE][BLOCK_SIZE][BLOCK_SIZE];
-	__shared__ SphVector yt_d[BLOCK_SIZE][BLOCK_SIZE][BLOCK_SIZE];
-	__shared__ Vector H_s[BLOCK_SIZE][BLOCK_SIZE][BLOCK_SIZE];
-	__shared__ SphVector y_s[BLOCK_SIZE][BLOCK_SIZE][BLOCK_SIZE];
-	__shared__ SphVector dydx_s[BLOCK_SIZE][BLOCK_SIZE][BLOCK_SIZE];
+		y_s = y_d[i];
+		dyt_s = dyt_d[i];
+
+		yt_s.r = y_s.r + hh * dyt_s.r;
+		yt_s.phi = y_s.phi + hh * dyt_s.phi;
+		yt_s.theta = y_s.theta + hh * dyt_s.theta;
+
+		yt_d[i] = yt_s;
 	
 	double hh, h6;
 	int ix = threadIdx.x;
-	int iy = threadIdx.y;
-	int iz = threadIdx.z;
+	SphVector y_s, dym_s, dyt_s, yt_s;
+
 	int tx = blockIdx.x * BLOCK_SIZE + ix;
-	int ty = blockIdx.y * BLOCK_SIZE + iy;
-	int tz = blockIdx.z * BLOCK_SIZE + iz;
-	int i = tz * WIDTH * HEIGHT + ty * WIDTH + tx;
+		y_s = y_d[i];
+		dym_s = dym_d[i];
+		dyt_s = dyt_d[i];
+
+		yt_s.r = y_s.r + h * dym_s.r;
+		dym_s.r += dyt_s.r;
+		yt_s.phi = y_s.phi + h * dym_s.phi;
+		dym_s.phi += dyt_s.phi;
+		yt_s.theta = y_s.theta + h * dym_s.theta;
+		dym_s.theta += dyt_s.theta;
+
+		yt_d[i] = yt_s;
+		dym_d[i] = dym_s;
 
 	if(tx < WIDTH && ty < HEIGHT && tz < DEPTH) {
 		//Load block into shared memory
-		y_s[iz][iy][ix] = y_d[i];
-
-		//the applied field
-		H_s[iz][iy][ix].x = H.x;
-		H_s[iz][iy][ix].y = H.y;
-		H_s[iz][iy][ix].z = H.z;
-
-		//the anisotropy field
-		H_s[iz][iy][ix].x += (1/y_s[iz][iy][ix].r) * -2 * KANIS * cos(y_s[iz][iy][ix].theta) * sin(y_s[iz][iy][ix].theta) * cos(y_s[iz][iy][ix].phi) * cos(y_s[iz][iy][ix].theta);
+	SphVector y_s, dydx_s, dyt_s, dym_s, yout_s;
 		H_s[iz][iy][ix].y += (1/y_s[iz][iy][ix].r) * -2 * KANIS * cos(y_s[iz][iy][ix].theta) * sin(y_s[iz][iy][ix].theta) * sin(y_s[iz][iy][ix].phi) * cos(y_s[iz][iy][ix].theta);
 		H_s[iz][iy][ix].z += (1/y_s[iz][iy][ix].r) * 2 * KANIS * cos(y_s[iz][iy][ix].theta) * sin(y_s[iz][iy][ix].theta) * sin(y_s[iz][iy][ix].theta);
 
@@ -149,55 +173,37 @@ __global__ void rk4Kernel(SphVector * y_d, int n, double x, double h, SphVector 
 		H_s[iz][iy][ix].z += Hex * (cos(up.theta) + cos(down.theta) + cos(left.theta) + cos(right.theta) + cos(front.theta) + cos(back.theta));
 
 	}
-
-
-	hh = h * 0.5;
-	h6 = h / 6.0;
-
-	//First step
-	dydx_s[iz][iy][ix].r = 0;
 	dydx_s[iz][iy][ix].phi = GAMMA * ((cos(y_s[iz][iy][ix].theta) * sin(y_s[iz][iy][ix].phi) * H_s[iz][iy][ix].y) / sin(y_s[iz][iy][ix].theta) + (cos(y_s[iz][iy][ix].theta) * cos(y_s[iz][iy][ix].phi) * H_s[iz][iy][ix].x) / sin(y_s[iz][iy][ix].theta) - H_s[iz][iy][ix].z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(y_s[iz][iy][ix].phi) * H_s[iz][iy][ix].y) / sin(y_s[iz][iy][ix].theta) - (sin(y_s[iz][iy][ix].phi) * H_s[iz][iy][ix].x) / sin(y_s[iz][iy][ix].theta));
 	dydx_s[iz][iy][ix].theta = -GAMMA * (cos(y_s[iz][iy][ix].phi) * H_s[iz][iy][ix].y - sin(y_s[iz][iy][ix].phi) * H_s[iz][iy][ix].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(y_s[iz][iy][ix].theta) * cos(y_s[iz][iy][ix].phi) * H_s[iz][iy][ix].x - H_s[iz][iy][ix].z * sin(y_s[iz][iy][ix].theta) + cos(y_s[iz][iy][ix].theta) * sin(y_s[iz][iy][ix].phi) * H_s[iz][iy][ix].y);
 
 	yt_d[iz][iy][ix].r = y_s[iz][iy][ix].r + hh * dydx_s[iz][iy][ix].r;
 	yt_d[iz][iy][ix].phi = y_s[iz][iy][ix].phi + hh * dydx_s[iz][iy][ix].phi;
 	yt_d[iz][iy][ix].theta = y_s[iz][iy][ix].theta + hh * dydx_s[iz][iy][ix].theta;
-
-	//Second step
-	dyt_d[iz][iy][ix].r = 0;
-	dyt_d[iz][iy][ix].phi = GAMMA * ((cos(yt_d[iz][iy][ix].theta) * sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y) / sin(yt_d[iz][iy][ix].theta) + (cos(yt_d[iz][iy][ix].theta) * cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x) / sin(yt_d[iz][iy][ix].theta) - H_s[iz][iy][ix].z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y) / sin(yt_d[iz][iy][ix].theta) - (sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x) / sin(yt_d[iz][iy][ix].theta));
 	dyt_d[iz][iy][ix].theta = -GAMMA * (cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y - sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(yt_d[iz][iy][ix].theta) * cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x - H_s[iz][iy][ix].z * sin(yt_d[iz][iy][ix].theta) + cos(yt_d[iz][iy][ix].theta) * sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y);
 
 	yt_d[iz][iy][ix].r = y_s[iz][iy][ix].r + hh * dyt_d[iz][iy][ix].r;
 	yt_d[iz][iy][ix].phi = y_s[iz][iy][ix].phi + hh * dyt_d[iz][iy][ix].phi;
 	yt_d[iz][iy][ix].theta = y_s[iz][iy][ix].theta + hh * dyt_d[iz][iy][ix].theta;
-
-	//Third step
-	dym_d[iz][iy][ix].r = 0;
-	dym_d[iz][iy][ix].phi = GAMMA * ((cos(yt_d[iz][iy][ix].theta) * sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y) / sin(yt_d[iz][iy][ix].theta) + (cos(yt_d[iz][iy][ix].theta) * cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x) / sin(yt_d[iz][iy][ix].theta) - H_s[iz][iy][ix].z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y) / sin(yt_d[iz][iy][ix].theta) - (sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x) / sin(yt_d[iz][iy][ix].theta));
 	dym_d[iz][iy][ix].theta = -GAMMA * (cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y - sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(yt_d[iz][iy][ix].theta) * cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x - H_s[iz][iy][ix].z * sin(yt_d[iz][iy][ix].theta) + cos(yt_d[iz][iy][ix].theta) * sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y);
 
-	yt_d[iz][iy][ix].r = y_s[iz][iy][ix].r + h * dym_d[iz][iy][ix].r;
-	dym_d[iz][iy][ix].r += dyt_d[iz][iy][ix].r;
-	yt_d[iz][iy][ix].phi = y_s[iz][iy][ix].phi + h * dym_d[iz][iy][ix].phi;
-	dym_d[iz][iy][ix].phi += dyt_d[iz][iy][ix].phi;
-	yt_d[iz][iy][ix].theta = y_s[iz][iy][ix].theta + h * dym_d[iz][iy][ix].theta;
+	if(i < n) {
+		y_s = y_d[i];
+		dydx_s = dydx_d[i];
+		dyt_s = dyt_d[i];
+		dym_s = dym_d[i];
 	dym_d[iz][iy][ix].theta += dyt_d[iz][iy][ix].theta;
-
-	//Fourth step
-	dyt_d[iz][iy][ix].r = 0;
-	dyt_d[iz][iy][ix].phi = GAMMA * ((cos(yt_d[iz][iy][ix].theta) * sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y) / sin(yt_d[iz][iy][ix].theta) + (cos(yt_d[iz][iy][ix].theta) * cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x) / sin(yt_d[iz][iy][ix].theta) - H_s[iz][iy][ix].z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y) / sin(yt_d[iz][iy][ix].theta) - (sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x) / sin(yt_d[iz][iy][ix].theta));
+		
+		yout_s.r = y_s.r + h6 * (dydx_s.r + dyt_s.r + 2.0 * dym_s.r);
+		yout_s.phi = y_s.phi + h6 * (dydx_s.phi + dyt_s.phi + 2.0 * dym_s.phi);
+		yout_s.theta = y_s.theta + h6 * (dydx_s.theta + dyt_s.theta + 2.0 * dym_s.theta);
 	dyt_d[iz][iy][ix].theta = -GAMMA * (cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y - sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(yt_d[iz][iy][ix].theta) * cos(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].x - H_s[iz][iy][ix].z * sin(yt_d[iz][iy][ix].theta) + cos(yt_d[iz][iy][ix].theta) * sin(yt_d[iz][iy][ix].phi) * H_s[iz][iy][ix].y);
 
-	if(i < n) {
-		yout_d[i].r = y_s[iz][iy][ix].r + h6 * (dydx_s[iz][iy][ix].r + dyt_d[iz][iy][ix].r + 2.0 * dym_d[iz][iy][ix].r);
-		yout_d[i].phi = y_s[iz][iy][ix].phi + h6 * (dydx_s[iz][iy][ix].phi + dyt_d[iz][iy][ix].phi + 2.0 * dym_d[iz][iy][ix].phi);
-		yout_d[i].theta = y_s[iz][iy][ix].theta + h6 * (dydx_s[iz][iy][ix].theta + dyt_d[iz][iy][ix].theta + 2.0 * dym_d[iz][iy][ix].theta);
+		yout_d[i] = yout_s;
 	}
 }
 
-//Computes the local applied field for every atom of moment M. The global applied field is passed in as H. 
-__global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, curandStateXORWOW_t * state) {
+//Computes the local applied field for every atom of moment M. The global applied field is passed in as H, and the thermal motion as Htherm. 
+__global__ void computeField(Vector * H_d, Vector H, Vector * Htherm_d, SphVector * M, int nvar) {
 	/* Declare shared memory for CUDA block.
 	   Since a halo element neighbors only one atom,
 	   halo elements are not loaded into shared memory.
@@ -209,33 +215,30 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, cu
 	int ty = blockIdx.y * BLOCK_SIZE + threadIdx.y;
 	int tz = blockIdx.z * BLOCK_SIZE + threadIdx.z;
 	int i = tz * WIDTH * HEIGHT +  ty * WIDTH + tx;
+	Vector H_t;
 
 	if(tx < WIDTH && ty < HEIGHT && tz < DEPTH) {
 		//Load block into shared memory
 		M_s[threadIdx.z][threadIdx.y][threadIdx.x] = M[i];
+		__syncthreads();
 
 		//the applied field
-		H_d[i].x = H.x;
-		H_d[i].y = H.y;
-		H_d[i].z = H.z;
+		H_t.x = H.x;
+		H_t.y = H.y;
+		H_t.z = H.z;
 
 		//the anisotropy field
-		H_d[i].x += (1/M_s[threadIdx.z][threadIdx.y][threadIdx.x].r) * -2 * KANIS * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].phi) * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta);
-		H_d[i].y += (1/M_s[threadIdx.z][threadIdx.y][threadIdx.x].r) * -2 * KANIS * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].phi) * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta);
-		H_d[i].z += (1/M_s[threadIdx.z][threadIdx.y][threadIdx.x].r) * 2 * KANIS * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta);
+		H_t.x += (1/M_s[threadIdx.z][threadIdx.y][threadIdx.x].r) * -2 * KANIS * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].phi) * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta);
+		H_t.y += (1/M_s[threadIdx.z][threadIdx.y][threadIdx.x].r) * -2 * KANIS * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].phi) * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta);
+		H_t.z += (1/M_s[threadIdx.z][threadIdx.y][threadIdx.x].r) * 2 * KANIS * cos(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta) * sin(M_s[threadIdx.z][threadIdx.y][threadIdx.x].theta);
 
 		//the field from random thermal motion
-		double vol = ALEN * ALEN * ALEN;
-		double sd = (1e9) * sqrt((2 * BOLTZ * TEMP * ALPHA)/(GAMMA * vol * MSAT * TIMESTEP)); //time has units of s here
+		Vector Htherm_s;
+		Htherm_s = Htherm_d[i];
 
-		double thermX = sd * curand_normal_double(&state[i]); 
-		double thermY = sd * curand_normal_double(&state[i]);
-		double thermZ = sd * curand_normal_double(&state[i]);
-
-		H_d[i].x += thermX;
-		H_d[i].y += thermY;
-		H_d[i].z += thermZ;
-
+		H_t.x += Htherm_s.x;
+		H_t.y += Htherm_s.y;
+		H_t.z += Htherm_s.z;
 
 		//the exchange field
 		SphVector up, down, left, right, front, back;
@@ -288,12 +291,83 @@ __global__ void computeField(Vector * H_d, Vector H, SphVector * M, int nvar, cu
 		else
 			back = M[i + (WIDTH * HEIGHT)];
 
-		double Hex = JEX / (MSAT * ALEN * ALEN);
+		double Hex = 2.0 * JEX / (MSAT * ALEN * ALEN);
 
-		H_d[i].x += Hex * (sin(up.theta) * cos(up.phi) + sin(down.theta) * cos(down.phi) + sin(left.theta) * cos(left.phi) + sin(right.theta) * cos(right.phi) + sin(front.theta) * cos(front.phi) + sin(back.theta) * cos(back.phi));
-		H_d[i].y += Hex * (sin(up.theta) * sin(up.phi) + sin(down.theta) * sin(down.phi) + sin(left.theta) * sin(left.phi) + sin(right.theta) * sin(right.phi) + sin(front.theta) * sin(front.phi) + sin(back.theta) * sin(back.phi)); 
-		H_d[i].z += Hex * (cos(up.theta) + cos(down.theta) + cos(left.theta) + cos(right.theta) + cos(front.theta) + cos(back.theta));
+		H_t.x += Hex * (sin(up.theta) * cos(up.phi) + sin(down.theta) * cos(down.phi) + sin(left.theta) * cos(left.phi) + sin(right.theta) * cos(right.phi) + sin(front.theta) * cos(front.phi) + sin(back.theta) * cos(back.phi));
+		H_t.y += Hex * (sin(up.theta) * sin(up.phi) + sin(down.theta) * sin(down.phi) + sin(left.theta) * sin(left.phi) + sin(right.theta) * sin(right.phi) + sin(front.theta) * sin(front.phi) + sin(back.theta) * sin(back.phi)); 
+		H_t.z += Hex * (cos(up.theta) + cos(down.theta) + cos(left.theta) + cos(right.theta) + cos(front.theta) + cos(back.theta));
+
+		H_d[i] = H_t;
 	}
+}
+
+//Shamelessly copied from Numerical Recipes
+/*
+Given values for the variables y[1..n] and their derivatives dydx[1..n] known at x , use the
+fourth-order Runge-Kutta method to advance the solution over an interval h and return the
+incremented variables as yout[1..n] , which need not be a distinct array from y . The user
+supplies the routine derivs(x,y,dydx) , which returns derivatives dydx at x .
+*/
+void rk4(SphVector y_d[], SphVector dydx_d[], int n, double x, double h, SphVector yout[], void (*derivs)(double, SphVector[], SphVector[], int, Vector[]), bool CopyToHost) {
+	double xh, hh, h6; 
+	dim3 blockDim(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+        dim3 gridDim(ceil((float)WIDTH/(float)BLOCK_SIZE), ceil((float)HEIGHT/(float)BLOCK_SIZE), ceil((float)DEPTH/(float)BLOCK_SIZE));	
+
+	//device arrays
+
+	//Scale field to avoid round-off errors
+	h *= ((2.0 * KANIS) / MSAT);
+
+	hh = h * 0.5;
+	h6 = h / 6.0;
+	xh = x + hh;
+
+	//First step
+	rk4First<<<ceil(n/512.0), 512>>>(yt_d, y_d, dydx_d, hh, n);
+
+	//Second step
+	computeField<<<gridDim, blockDim>>>(H_d, H, Htherm_d, yt_d, n); 
+	(*derivs)<<<ceil(n/512.0), 512>>>(xh, yt_d, dyt_d, n, H_d);
+	rk4Second<<<ceil(n/512.0), 512>>>(yt_d, y_d, dyt_d, hh, n);
+
+	//Third step
+	computeField<<<gridDim, blockDim>>>(H_d, H, Htherm_d, yt_d, n); 
+	(*derivs)<<<ceil(n/512.0), 512>>>(xh, yt_d, dym_d, n, H_d);
+	rk4Third<<<ceil(n/512.0), 512>>>(yt_d, y_d, dym_d, dyt_d, h, n);
+
+	//Fourth step
+	computeField<<<gridDim, blockDim>>>(H_d, H, Htherm_d, yt_d, n); 
+	(*derivs)<<<ceil(n/512.0), 512>>>(x + h, yt_d, dyt_d, n, H_d);
+	//Accumulate increments with proper weights
+	rk4Fourth<<<ceil(n/512.0), 512>>>(yout_d, y_d, dydx_d, dyt_d, dym_d, h6, n);
+
+	//Copy yout to host
+	if(CopyToHost)
+		cudaMemcpy(yout, yout_d, sizeof(SphVector) * n, cudaMemcpyDeviceToHost);
+	
+	//cudaFree(yout_d);
+}
+
+__global__ void computeHtherm(Vector * Htherm_d, int nvar, curandStateXORWOW_t * state, double temp) {
+		int i = threadIdx.x + blockDim.x * blockIdx.x;
+
+		if(i < nvar) {
+			//the field from random thermal motion
+			double vol = ALEN * ALEN * ALEN;
+			double sd = (1e9) * sqrt((2 * BOLTZ * temp * ALPHA)/(GAMMA * vol * MSAT * TIMESTEP)); //time has units of s here
+
+			double thermX = sd * curand_normal_double(&state[i]); 
+			double thermY = sd * curand_normal_double(&state[i]);
+			double thermZ = sd * curand_normal_double(&state[i]);
+
+			Vector Htherm_s;
+
+			Htherm_s.x = thermX;
+			Htherm_s.y = thermY;
+			Htherm_s.z = thermZ;
+		
+			Htherm_d[i] = Htherm_s;
+		}
 }
 
 __global__ void mDot(double t, SphVector M[], SphVector dMdt[], int nvar, Vector H[]) {
@@ -301,12 +375,19 @@ __global__ void mDot(double t, SphVector M[], SphVector dMdt[], int nvar, Vector
 
 	//Compute derivative
 	if(i < nvar) {
-		SphVector M_s = M[i];
+		SphVector M_s = M[i], dMdt_s;
 		Vector H_s = H[i];
 
-		dMdt[i].r = 0;
-		dMdt[i].phi = GAMMA * ((cos(M_s.theta) * sin(M_s.phi) * H_s.y) / sin(M_s.theta) + (cos(M_s.theta) * cos(M_s.phi) * H_s.x) / sin(M_s.theta) - H_s.z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(M_s.phi) * H_s.y) / sin(M_s.theta) - (sin(M_s.phi) * H_s.x) / sin(M_s.theta));
-		dMdt[i].theta = -GAMMA * (cos(M_s.phi) * H_s.y - sin(M_s.phi) * H_s.x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(M_s.theta) * cos(M_s.phi) * H_s.x - H_s.z * sin(M_s.theta) + cos(M_s.theta) * sin(M_s.phi) * H_s.y);
+		//Scale field to avoid round-off errors
+		H_s.x /= ((2.0 * KANIS) / MSAT);
+		H_s.y /= ((2.0 * KANIS) / MSAT);
+		H_s.z /= ((2.0 * KANIS) / MSAT);
+
+		dMdt_s.r = 0;
+		dMdt_s.phi = GAMMA * ((cos(M_s.theta) * sin(M_s.phi) * H_s.y) / sin(M_s.theta) + (cos(M_s.theta) * cos(M_s.phi) * H_s.x) / sin(M_s.theta) - H_s.z) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * ((cos(M_s.phi) * H_s.y) / sin(M_s.theta) - (sin(M_s.phi) * H_s.x) / sin(M_s.theta));
+		dMdt_s.theta = -GAMMA * (cos(M_s.phi) * H_s.y - sin(M_s.phi) * H_s.x) + ((ALPHA * GAMMA)/(1 + ALPHA * ALPHA)) * (cos(M_s.theta) * cos(M_s.phi) * H_s.x - H_s.z * sin(M_s.theta) + cos(M_s.theta) * sin(M_s.phi) * H_s.y);
+	
+		dMdt[i] = dMdt_s;
 	}
 }
 
@@ -317,25 +398,15 @@ evaluates derivatives. Results are stored in the global variables y[0..nvar-1][0
 and xx[0..nstep].
 */
 void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void (*derivs)(double, SphVector[], SphVector[], int, Vector[])) {
-	double x, h;
+	double x, h, temp = TEMPAMB;
 	dim3 blockDim(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
-        dim3 gridDim(ceil(WIDTH/BLOCK_SIZE), ceil(HEIGHT/BLOCK_SIZE), ceil(DEPTH/BLOCK_SIZE));	
+        dim3 gridDim(ceil((float)WIDTH/(float)BLOCK_SIZE), ceil((float)HEIGHT/(float)BLOCK_SIZE), ceil((float)DEPTH/(float)BLOCK_SIZE));	
 	SphVector *v, *vout, *dv;
-
-	//device arrays
-	SphVector *v_d, *dv_d, *yout_d;
 
 	v = (SphVector *)malloc(sizeof(SphVector) * nvar);
 	vout = (SphVector *)malloc(sizeof(SphVector) * nvar);
 	dv = (SphVector *)malloc(sizeof(SphVector) * nvar);
 
-	gpuErrchk( cudaMalloc((void **)&yout_d, sizeof(SphVector) * nvar) );
-
-	//allocate device memory for mDot
-	gpuErrchk( cudaMalloc((void **)&v_d, sizeof(SphVector) * nvar) );
-	gpuErrchk( cudaMalloc((void **)&dv_d, sizeof(SphVector) * nvar) );
-	gpuErrchk( cudaMalloc((void **)&H_d, sizeof(SphVector) * nvar) );
-	
 	for (int i = 0;i < nvar;i++) { 
 		v[i] = vstart[i];
 		y[i][0] = v[i]; 
@@ -346,6 +417,22 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	h = (x2-x1)/nstep;
 
 	for (int k = 0; k < nstep; k++) {
+
+		if(!(k % 1000)) {
+			double t = x1 + k * TIMESTEP;
+			if(t <= TPULSE) {
+				double g = 1 - exp(-t/TAU);
+				temp = TEMPAMB + TEMPDELTA * g;
+			}
+			else if(t > TPULSE) {
+				double g = exp(-(t - TPULSE)/TAU);
+				temp = TEMPAMB + TEMPDELTA * g;
+			}
+		}
+
+		if(k == 0){
+			fprintf(output, "%f\t", temp);
+		}
 
 		//Copy memory to device
 		//After the first timestep, the value of v and yout_d are the same. d2d memcpy is much faster than h2s, so do it instead
@@ -358,8 +445,11 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 			yout_d = t_d;
 		}
 
+		//Generate thermal noise
+		computeHtherm<<<ceil(nvar/512.0), 512>>>(Htherm_d, nvar, state, temp);
+
 		//Launch kernel to compute H field
-		//computeField<<<gridDim, blockDim>>>(H_d, H, v_d, nvar, state); 
+		computeField<<<gridDim, blockDim>>>(H_d, H, Htherm_d, v_d, nvar); 
 
 		rk4Kernel<<<gridDim, blockDim>>>(v_d, nvar, x, h, yout_d, H, state);
 		gpuErrchk( cudaPeekAtLastError() );
@@ -379,10 +469,6 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	free(dv);
 	free(vout);
 	free(v);
-	gpuErrchk( cudaFree(yout_d) );
-	gpuErrchk( cudaFree(v_d) );
-	gpuErrchk( cudaFree(dv_d) );
-	gpuErrchk( cudaFree(H_d) );
 }
 
 int main(int argc, char *argv[]) {
@@ -391,10 +477,21 @@ int main(int argc, char *argv[]) {
 	double endTime;
 	SphVector vstart[nvar]; 
 
-	FILE * output = fopen("output.txt", "w");
-	if(output == NULL) {
-		printf("error opening file\n");
-		return 0;
+	char fileName[128] = {0};
+	char * jobId = getenv("PBS_JOBID");
+	strcpy(fileName, jobId);
+
+	//Check if a file named fileName already exists, needed for two-GPU jobs
+	struct stat buffer;
+	int fd = stat(fileName, &buffer);
+	if(fd < 0) {
+		//file doesn't exist
+		output = fopen(fileName, "w");
+	}
+	else {
+		//file exists
+		strcat(fileName, "-1");
+		output = fopen(fileName, "w");
 	}
 
 	#if BENCHMARK
@@ -403,7 +500,7 @@ int main(int argc, char *argv[]) {
 		printf("error opening file: times.txt\n");
 		return 1;
 	}
-	fprintf(times, "Time to simulate %fns\n", FIELDTIMESTEP);
+	//fprintf(times, "Time to simulate %fns\n", FIELDTIMESTEP);
 	#endif
 
 	//Initialize random number generator
@@ -411,17 +508,31 @@ int main(int argc, char *argv[]) {
 	cudaMalloc((void **)&state, sizeof(curandStateXORWOW_t) * nvar);
 	initializeRandom<<<ceil(nvar/512.0), 512>>>(state, nvar, seed);
 	
-	//Configure shared/L1 as 48KB/16KB
-	cudaDeviceSetCacheConfig(cudaFuncCachePreferShared);
-	
+	//allocate device arrays
+	cudaMalloc((void **)&dym_d, sizeof(SphVector) * nvar);
+	cudaMalloc((void **)&dyt_d, sizeof(SphVector) * nvar);
+	cudaMalloc((void **)&yt_d, sizeof(SphVector) * nvar);
+	cudaMalloc((void **)&yout_d, sizeof(SphVector) * nvar);
+
+	//allocate device memory for mDot
+	cudaMalloc((void **)&v_d, sizeof(SphVector) * nvar);
+	cudaMalloc((void **)&dv_d, sizeof(SphVector) * nvar);
+	cudaMalloc((void **)&H_d, sizeof(Vector) * nvar);
+
+	//allocate device memory for thermal motion
+	cudaMalloc((void **)&Htherm_d, sizeof(Vector) * nvar);
+
 	for(int i = 0; i < nvar; i++) {	
 		vstart[i].r = MSAT;
-		vstart[i].theta = 0.01;
+		vstart[i].theta = 3.13;
 		vstart[i].phi = 0;
 	}
 
-	Vector Happl = {0.0, 0.0, FIELDRANGE};
-	endTime = FIELDTIMESTEP; 
+	//Vector Happl = {0.0, 0.0, FIELDRANGE};
+	Vector Happl = {0.0, 0.0, 0.5e4};	
+	//endTime = FIELDTIMESTEP; 
+	//endTime = 2.538;
+	endTime = 2.0 * TPULSE;
 	endTime /= 100; //Reduce host memory usage
 	nstep = ((int)ceil(endTime/TIMESTEP));
 
@@ -431,34 +542,24 @@ int main(int argc, char *argv[]) {
 		y[i] = (SphVector *)malloc(sizeof(SphVector) * (nstep + 1));
 	}
 
-	
-	bool isDecreasing = true;
-	for(int i = 0; i <= (4 * (int)(FIELDRANGE/FIELDSTEP)); i++) {
-		//Applied field
-		H.x = Happl.x;
-		H.y = Happl.y;
-		H.z = Happl.z;
+	//Applied field
+	H.x = Happl.x;
+	H.y = Happl.y;
+	H.z = Happl.z;
 
-		#if BENCHMARK
-		time_t start = time(NULL);
-		#endif
+	#if BENCHMARK
+	time_t start = time(NULL);
+	#endif
 
-		for(int j = 0; j < 100; j++) {
-			//Simulate!
-			rkdumb(vstart, nvar, endTime * j, endTime * (j + 1) - TIMESTEP, nstep, mDot); 
+	for(int j = 0; j < 100; j++) {
+		//Simulate!
+		rkdumb(vstart, nvar, endTime * j, endTime * (j + 1) - TIMESTEP, nstep, mDot); 
 
-			for(int i = 0; i < nvar; i++) {
-				vstart[i].r = y[i][nstep].r;
-				vstart[i].theta = y[i][nstep].theta;
-				vstart[i].phi = y[i][nstep].phi;
-			}
+		for(int i = 0; i < nvar; i++) {
+			vstart[i].r = y[i][nstep].r;
+			vstart[i].theta = y[i][nstep].theta;
+			vstart[i].phi = y[i][nstep].phi;
 		}
-	
-		#if BENCHMARK
-		time_t end = time(NULL);
-		fprintf(times, "%lds\n", (long)(end - start));
-		fflush(times);
-		#endif
 
 		double mag = 0.0;	
 		for(int k = 0; k < nvar; k++) {
@@ -466,16 +567,30 @@ int main(int argc, char *argv[]) {
 		}
 
 		mag /= (double)nvar;
-		fprintf(output, "%f\t%f\n", Happl.z, mag);
+		fprintf(output, "%f\t%f\n", endTime * (j + 1), mag);
 		fflush(output);
-
-		//Adjust applied field strength at endTime intervals	
-		if(Happl.z + FIELDRANGE < 1.0) isDecreasing = false;
-		isDecreasing ? (Happl.z -= FIELDSTEP) : (Happl.z += FIELDSTEP);
 	}
+
+	#if BENCHMARK
+	time_t end = time(NULL);
+	fprintf(times, "%lds\n", (long)(end - start));
+	fflush(times);
+	#endif
+
 	//Probably don't really need these since we're about to exit the program
 	free(xx);
 	free(y);
 	cudaFree(state);
+
+	//Free device arrays
+	cudaFree(yt_d);
+	cudaFree(dyt_d);
+	cudaFree(dym_d);
+	cudaFree(v_d);
+	cudaFree(dv_d);
+	cudaFree(H_d);
+	cudaFree(Htherm_d);
+	cudaFree(yout_d);
+
 	return 0;
 }
