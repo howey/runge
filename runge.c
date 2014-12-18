@@ -14,14 +14,8 @@ static const double FIELDSTEP = 500.0; //Oe, the change in the applied field
 static const double FIELDTIMESTEP = 0.1; //ns, time to wait before changing applied field
 static const double FIELDRANGE = 130000.0; //Oe, create loop from FIELDRANGE to -FIELDRANGE Oe
 
-static double *xx;
-static SphVector **y;
-static Vector *H;
-static Vector Happl;
-static Vector * Htherm;
-
-//Computes the local applied field for every atom of moment M. The global applied field is passed in as Happl. 
-void computeField(Vector * H, Vector Happl, const SphVector * M, int nvar) {
+//Computes the local applied field for every atom of moment M.
+void computeField(Vector * H, const SphVector * M, int nvar, Vector Happl, Vector * Htherm) {
 	for(int i = 0; i < nvar; i++) {
 		//the applied field
 		H[i].x = Happl.x;
@@ -86,13 +80,13 @@ fourth-order Runge-Kutta method to advance the solution over an interval h and r
 incremented variables as yout[1..n] , which need not be a distinct array from y . The user
 supplies the routine derivs(x,y,dydx) , which returns derivatives dydx at x .
 */
-void rk4(SphVector y[], SphVector dydx[], int n, double x, double h, SphVector yout[], void (*derivs)(double, SphVector[], SphVector[], int, Vector[])) {
-	double xh, hh, h6; 
+void rk4(SphVector * y, SphVector * dydx, int n, double x, double h, SphVector * yout, void (*derivs)(SphVector *, SphVector *, int, Vector *), Vector * H, Vector Happl, Vector * Htherm) {
+	double hh, h6; 
 	SphVector *dym, *dyt, *yt;
 
-	dym = (SphVector *)malloc(sizeof(SphVector) * n);
-	dyt = (SphVector *)malloc(sizeof(SphVector) * n);
-	yt = (SphVector *)malloc(sizeof(SphVector) * n);
+	dym = (SphVector *)malloc(sizeof(SphVector) * (long unsigned int)n);
+	dyt = (SphVector *)malloc(sizeof(SphVector) * (long unsigned int)n);
+	yt = (SphVector *)malloc(sizeof(SphVector) * (long unsigned int)n);
 
 	//Scale field and time to avoid roundoff errors
 	double scale = (2.0 * KANIS / MSAT);
@@ -100,7 +94,6 @@ void rk4(SphVector y[], SphVector dydx[], int n, double x, double h, SphVector y
 
 	hh = h * 0.5;
 	h6 = h / 6.0;
-	xh = x + hh;
 
 	//First step
 	for (int i = 0; i < n; i++) {
@@ -110,8 +103,8 @@ void rk4(SphVector y[], SphVector dydx[], int n, double x, double h, SphVector y
 		yt[i].theta = y[i].theta + hh * dydx[i].theta;
 	}
 	//Second step
-	computeField(H, Happl, yt, n);	
-	(*derivs)(xh, yt, dyt, n, H);
+	computeField(H, yt, n, Happl, Htherm);	
+	(*derivs)(yt, dyt, n, H);
 	for (int i = 0; i < n; i++) {
 		//yt[i] = y[i] + hh * dyt[i];
 		yt[i].r = y[i].r + hh * dyt[i].r;
@@ -119,8 +112,8 @@ void rk4(SphVector y[], SphVector dydx[], int n, double x, double h, SphVector y
 		yt[i].theta = y[i].theta + hh * dyt[i].theta;
 	}
 	//Third step
-	computeField(H, Happl, yt, n);	
-	(*derivs)(xh, yt, dym, n, H);
+	computeField(H, yt, n, Happl, Htherm);	
+	(*derivs)(yt, dym, n, H);
 	for (int i = 0; i < n; i++) {
 		//yt[i] = y[i] + h * dym[i];
 		//dym[i] += dyt[i];
@@ -132,8 +125,8 @@ void rk4(SphVector y[], SphVector dydx[], int n, double x, double h, SphVector y
 		dym[i].theta += dyt[i].theta;
 	}
 	//Fourth step
-	computeField(H, Happl, yt, n);	
-	(*derivs)(x + h, yt, dyt, n, H);
+	computeField(H, yt, n, Happl, Htherm);	
+	(*derivs)(yt, dyt, n, H);
 	//Accumulate increments with proper weights
 	for (int i = 0; i < n; i++) {
 		//yout[i] = y[i] + h6 * (dydx[i] + dyt[i] + 2.0 * dym[i]);
@@ -148,7 +141,7 @@ void rk4(SphVector y[], SphVector dydx[], int n, double x, double h, SphVector y
 	free(dym);
 }
 
-void mDot(double t, SphVector M[], SphVector dMdt[], int nvar, Vector H[]) {
+void mDot(SphVector M[], SphVector dMdt[], int nvar, Vector H[]) {
 
 	//Compute derivative
 	for(int i = 0; i < nvar; i++) {
@@ -171,15 +164,16 @@ to advance nstep equal increments to x2. The user-supplied routine derivs(x,v,dv
 evaluates derivatives. Results are stored in the global variables y[0..nvar-1][0..nstep]
 and xx[0..nstep].
 */
-void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void (*derivs)(double, SphVector[], SphVector[], int, Vector[])) {
+void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void (*derivs)(SphVector[], SphVector[], int, Vector[]), double * xx, SphVector ** y, Vector Happl) {
 	double x, h;
-	SphVector *v, *vout, *dv;
+	SphVector * v, * vout, * dv;
+	Vector * H, * Htherm;
 
-	v = (SphVector *)malloc(sizeof(SphVector) * nvar);
-	vout = (SphVector *)malloc(sizeof(SphVector) * nvar);
-	dv = (SphVector *)malloc(sizeof(SphVector) * nvar);
-	H = (Vector *)malloc(sizeof(Vector) * nvar);
-	Htherm = (Vector *)malloc(sizeof(Vector) * nvar);
+	v = (SphVector *)malloc(sizeof(SphVector) * (long unsigned int)nvar);
+	vout = (SphVector *)malloc(sizeof(SphVector) * (long unsigned int)nvar);
+	dv = (SphVector *)malloc(sizeof(SphVector) * (long unsigned int)nvar);
+	H = (Vector *)malloc(sizeof(Vector) * (long unsigned int)nvar);
+	Htherm = (Vector *)malloc(sizeof(Vector) * (long unsigned int)nvar);
 
 	for (int i = 0;i < nvar;i++) { 
 		v[i] = vstart[i];
@@ -207,12 +201,12 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 		}
 
 		//Compute H field
-		computeField(H, Happl, v, nvar);	
+		computeField(H, v, nvar, Happl, Htherm);	
 
 		//Compute derivatives
-		(*derivs)(x, v, dv, nvar, H);
+		(*derivs)(v, dv, nvar, H);
 		
-		rk4(v,dv,nvar,x,h,vout,derivs);
+		rk4(v, dv, nvar, x, h, vout, derivs, H, Happl, Htherm);
 		if ((double)(x + h) == x) fprintf(stderr, "Step size too small in routine rkdumb");
 		x += h;
 		xx[k + 1] = x;
@@ -229,7 +223,7 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	free(v);
 }
 
-int main(int argc, char *argv[]) {
+int main(){
 	int nvar = HEIGHT * WIDTH * DEPTH; //M for each particle 
 	int nstep;
 	double endTime;
@@ -251,7 +245,7 @@ int main(int argc, char *argv[]) {
 	#endif
 
 	//seed random number generator
-	srand(time(NULL));
+	srand((unsigned int)time(NULL));
 
 	for(int i = 0; i < nvar; i++) {	
 		vstart[i].r = MSAT;
@@ -259,18 +253,18 @@ int main(int argc, char *argv[]) {
 		vstart[i].phi = 0;
 	}
 
-	Happl.x = 0.0;
-	Happl.y = 0.0;
-	Happl.z = FIELDRANGE;
+	double * xx;
+	SphVector ** y;
+	Vector Happl = {0.0, 0.0, FIELDRANGE}; 
 
 	endTime = FIELDTIMESTEP; 
 	endTime /= 100; //Reduce host memory usage
 	nstep = ((int)ceil(endTime/TIMESTEP));
 
-	xx = (double *)malloc(sizeof(double) * (nstep + 1));
-	y = (SphVector **)malloc(sizeof(SphVector *) * nvar); 
+	xx = (double *)malloc(sizeof(double) * (long unsigned int)(nstep + 1));
+	y = (SphVector **)malloc(sizeof(SphVector *) * (long unsigned int)nvar); 
 	for(int i = 0; i < nvar; i++) {
-		y[i] = (SphVector *)malloc(sizeof(SphVector) * (nstep + 1));
+		y[i] = (SphVector *)malloc(sizeof(SphVector) * (long unsigned int)(nstep + 1));
 	}
 	
 	bool isDecreasing = true;
@@ -281,12 +275,12 @@ int main(int argc, char *argv[]) {
 
 		for(int j = 0; j < 100; j++) {
 			//Simulate!
-			rkdumb(vstart, nvar, endTime * j, endTime * (j + 1) - TIMESTEP, nstep, mDot); 
+			rkdumb(vstart, nvar, endTime * j, endTime * (j + 1) - TIMESTEP, nstep, mDot, xx, y, Happl); 
 
-			for(int i = 0; i < nvar; i++) {
-				vstart[i].r = y[i][nstep].r;
-				vstart[i].theta = y[i][nstep].theta;
-				vstart[i].phi = y[i][nstep].phi;
+			for(int k = 0; k < nvar; k++) {
+				vstart[k].r = y[k][nstep].r;
+				vstart[k].theta = y[k][nstep].theta;
+				vstart[k].phi = y[k][nstep].phi;
 			}
 		}
 
