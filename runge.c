@@ -80,7 +80,7 @@ fourth-order Runge-Kutta method to advance the solution over an interval h and r
 incremented variables as yout[1..n] , which need not be a distinct array from y . The user
 supplies the routine derivs(x,y,dydx) , which returns derivatives dydx at x .
 */
-void rk4(SphVector * y, SphVector * dydx, int n, double x, double h, SphVector * yout, void (*derivs)(SphVector *, SphVector *, int, Vector *), Vector * H, Vector Happl, Vector * Htherm) {
+void rk4(SphVector * y, SphVector * dydx, int n, double h, SphVector * yout, Vector * H, Vector Happl, Vector * Htherm) {
 	double hh, h6; 
 	SphVector *dym, *dyt, *yt;
 
@@ -104,7 +104,7 @@ void rk4(SphVector * y, SphVector * dydx, int n, double x, double h, SphVector *
 	}
 	//Second step
 	computeField(H, yt, n, Happl, Htherm);	
-	(*derivs)(yt, dyt, n, H);
+	mDot(yt, dyt, n, H);
 	for (int i = 0; i < n; i++) {
 		//yt[i] = y[i] + hh * dyt[i];
 		yt[i].r = y[i].r + hh * dyt[i].r;
@@ -113,7 +113,7 @@ void rk4(SphVector * y, SphVector * dydx, int n, double x, double h, SphVector *
 	}
 	//Third step
 	computeField(H, yt, n, Happl, Htherm);	
-	(*derivs)(yt, dym, n, H);
+	mDot(yt, dym, n, H);
 	for (int i = 0; i < n; i++) {
 		//yt[i] = y[i] + h * dym[i];
 		//dym[i] += dyt[i];
@@ -126,7 +126,7 @@ void rk4(SphVector * y, SphVector * dydx, int n, double x, double h, SphVector *
 	}
 	//Fourth step
 	computeField(H, yt, n, Happl, Htherm);	
-	(*derivs)(yt, dyt, n, H);
+	mDot(yt, dyt, n, H);
 	//Accumulate increments with proper weights
 	for (int i = 0; i < n; i++) {
 		//yout[i] = y[i] + h6 * (dydx[i] + dyt[i] + 2.0 * dym[i]);
@@ -164,7 +164,7 @@ to advance nstep equal increments to x2. The user-supplied routine derivs(x,v,dv
 evaluates derivatives. Results are stored in the global variables y[0..nvar-1][0..nstep]
 and xx[0..nstep].
 */
-void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void (*derivs)(SphVector[], SphVector[], int, Vector[]), double * xx, SphVector ** y, Vector Happl) {
+void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, double * xx, SphVector ** y, Vector Happl) {
 	double x, h;
 	SphVector * v, * vout, * dv;
 	Vector * H, * Htherm;
@@ -204,9 +204,9 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 		computeField(H, v, nvar, Happl, Htherm);	
 
 		//Compute derivatives
-		(*derivs)(v, dv, nvar, H);
+		mDot(v, dv, nvar, H);
 		
-		rk4(v, dv, nvar, x, h, vout, derivs, H, Happl, Htherm);
+		rk4(v, dv, nvar, h, vout, H, Happl, Htherm);
 		if ((double)(x + h) == x) fprintf(stderr, "Step size too small in routine rkdumb");
 		x += h;
 		xx[k + 1] = x;
@@ -223,7 +223,7 @@ void rkdumb(SphVector vstart[], int nvar, double x1, double x2, int nstep, void 
 	free(v);
 }
 
-int main(){
+int main(void){
 	int nvar = HEIGHT * WIDTH * DEPTH; //M for each particle 
 	int nstep;
 	double endTime;
@@ -275,7 +275,7 @@ int main(){
 
 		for(int j = 0; j < 100; j++) {
 			//Simulate!
-			rkdumb(vstart, nvar, endTime * j, endTime * (j + 1) - TIMESTEP, nstep, mDot, xx, y, Happl); 
+			rkdumb(vstart, nvar, endTime * j, endTime * (j + 1) - TIMESTEP, nstep, xx, y, Happl); 
 
 			for(int k = 0; k < nvar; k++) {
 				vstart[k].r = y[k][nstep].r;

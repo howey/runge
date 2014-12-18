@@ -34,5 +34,8 @@ typedef struct {
 //Function prototypes
 
 double nextDouble(double, double);
-double nextGaussian();
-//void mDot(double, SphVector[], SphVector[], int, Vector[]);
+double nextGaussian(void);
+void computeField(Vector *, const SphVector *, int, Vector, Vector *);
+void rk4(SphVector *, SphVector *, int, double, SphVector *, Vector *, Vector, Vector *); 
+void mDot(SphVector *, SphVector *, int, Vector *);
+void rkdumb(SphVector *, int, double, double, int, double *, SphVector **, Vector);

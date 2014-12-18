@@ -1,16 +1,15 @@
-all: runge
+CC = gcc
+FLAGS = -Werror -Wall -O2 -W -Wmissing-prototypes -Wstrict-prototypes -Wconversion -Wshadow -Wpointer-arith -Wcast-qual -Wcast-align -Wwrite-strings -fno-common -Wnested-externs -g -std=c99
+LIBS = -lm
 
-runge: runge.cu 
-	nvcc runge.cu -o runge
+cpu: runge.o mars.o 
+	$(CC) $(FLAGS) $(LIBS) runge.o mars.o -o runge
 
-#dbg: runge.c
-#	gcc -lm -g -std=c99 runge.c -o runge
+runge.o: runge.c runge.h
+	$(CC) $(FLAGS) $(LIBS) runge.c -c
 
-#profile: runge.c
-#	gcc -lm -g -pg -O2 -std=c99 runge.c -o runge
-#	./runge
-#	gprof ./runge
-	
+mars.o: mars.c runge.h
+	$(CC) $(FLAGS) $(LIBS) mars.c -c
+
 clean:
-	rm -f runge
-	rm -f gmon.out
+	rm -f runge runge.o mars.o
