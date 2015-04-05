@@ -1,6 +1,7 @@
-#define HEIGHT 20 //Atoms in y direction
-#define WIDTH 20 //Atoms in x direction
-#define DEPTH 20 //Atoms in z direction
+#define HEIGHT 2 //Atoms in y direction
+#define WIDTH 2 //Atoms in x direction
+#define DEPTH 1 //Atoms in z direction
+#define SIZE (HEIGHT * WIDTH * DEPTH)
 
 #define BLOCK_SIZE 5 //Side length of 3D CUDA block
 //#define VECTOR_SIZE 256 //Length of 1D CUDA block
@@ -35,7 +36,7 @@ typedef struct {
 
 double nextDouble(double, double);
 double nextGaussian(void);
-void computeField(Vector *, const SphVector *, int, Vector, Vector *);
-void rk4(SphVector *, SphVector *, int, double, SphVector *, Vector *, Vector, Vector *); 
-void mDot(SphVector *, SphVector *, int, Vector *);
-void rkdumb(SphVector *, int, double, double, int, double *, SphVector **, Vector);
+void computeField(Vector *, const SphVector *, Vector, Vector *);
+void rk4(SphVector *, SphVector *, double, SphVector *, Vector *, Vector, Vector *); 
+void mDot(SphVector *, SphVector *, Vector *);
+void rkdumb(SphVector *, double, double, int, double *, SphVector **, Vector);
