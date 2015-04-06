@@ -3,6 +3,20 @@
 /* Time is in units of ns */
 static const double ALPHA = 0.02; //dimensionless
 static const double GAMMA = 1.76e-2; //(Oe*ns)^-1
+static const double KANIS = 1.0e6; //erg*cm^-3
+static const double TIMESTEP = (1e-5); //ns, the integrator timestep
+static const double MSAT = 500.0; //emu*cm^-3
+static const double JEX = 0.0; //erg*cm^-1
+static const double ALEN = 1.1e-6; //cm
+static const double TEMP = 300.0; //K
+static const double BOLTZ = 1.38e-34; //g*cm^2*ns^-2*K^-1
+static const double FIELDSTEP = 5.0; //Oe, the change in the applied field
+static const double FIELDTIMESTEP = 0.1; //ns, time to wait before changing applied field
+static const double FIELDRANGE = 5000.0; //Oe, create loop from FIELDRANGE to -FIELDRANGE Oe
+
+/*
+static const double ALPHA = 0.02; //dimensionless
+static const double GAMMA = 1.76e-2; //(Oe*ns)^-1
 static const double KANIS = 7.0e7; //erg*cm^-3
 static const double TIMESTEP = (1e-7); //ns, the integrator timestep
 static const double MSAT = 1100.0; //emu*cm^-3
@@ -13,10 +27,11 @@ static const double BOLTZ = 1.38e-34; //g*cm^2*ns^-2*K^-1
 static const double FIELDSTEP = 500.0; //Oe, the change in the applied field
 static const double FIELDTIMESTEP = 0.1; //ns, time to wait before changing applied field
 static const double FIELDRANGE = 130000.0; //Oe, create loop from FIELDRANGE to -FIELDRANGE Oe
-
+*/
 
 //Computes the local applied field for every atom of moment M.
 void computeField(Vector * H, const SphVector * M, Vector Happl, Vector * Htherm) {
+
 	for(int i = 0; i < SIZE; i++) {
 		//the applied field
 		H[i].x = Happl.x;
@@ -81,12 +96,15 @@ fourth-order Runge-Kutta method to advance the solution over an interval h and r
 incremented variables as yout[1..n] , which need not be a distinct array from y . The user
 supplies the routine derivs(x,y,dydx) , which returns derivatives dydx at x .
 */
-void rk4(SphVector * y, SphVector * dydx, double h, SphVector * yout, Vector * H, Vector Happl, Vector * Htherm) {
+void rk4(SphVector * restrict ya, SphVector * restrict dydxa, double h, SphVector * restrict yout, Vector * restrict H, Vector Happl, Vector * restrict Htherm) {
 	double hh, h6; 
 
 	SphVector dym[SIZE];
 	SphVector dyt[SIZE];
 	SphVector yt[SIZE];
+
+	SphVector * y = __builtin_assume_aligned(ya, 16);
+	SphVector * dydx = __builtin_assume_aligned(dydxa, 16);
 
 	//Scale field and time to avoid roundoff errors
 	double scale = (2.0 * KANIS / MSAT);
@@ -139,9 +157,9 @@ void rk4(SphVector * y, SphVector * dydx, double h, SphVector * yout, Vector * H
 void mDot(SphVector M[], SphVector dMdt[], Vector H[]) {
 
 	//Compute derivative
+	double scale = (2.0 * KANIS / MSAT);
 	for(int i = 0; i < SIZE; i++) {
 		//Scale field to avoid roundoff errors
-		double scale = (2.0 * KANIS / MSAT);
 		Vector Hsc = H[i];
 		Hsc.x /= scale;
 		Hsc.y /= scale;

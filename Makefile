@@ -1,5 +1,5 @@
 CC = gcc
-FLAGS = -Werror -Wall -O2 -W -Wmissing-prototypes -Wstrict-prototypes -Wconversion -Wshadow -Wpointer-arith -Wcast-qual -Wcast-align -Wwrite-strings -fno-common -Wnested-externs -g -std=c99
+FLAGS = -Werror -Wall -O2 -ftree-vectorize -W -Wmissing-prototypes -Wstrict-prototypes -Wconversion -Wshadow -Wpointer-arith -Wcast-qual -Wcast-align -Wwrite-strings -fno-common -Wnested-externs -g -std=c99
 LIBS = -lm
 
 cpu: runge.o mars.o 
