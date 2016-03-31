@@ -1,6 +1,7 @@
 #include "runge.h"
 
 /* Time is in units of ns */
+#ifndef RIGID
 static const double ALPHA = 0.02; //dimensionless
 static const double GAMMA = 1.76e-2; //(Oe*ns)^-1
 static const double KANIS = 7.0e7; //erg*cm^-3
@@ -13,7 +14,20 @@ static const double BOLTZ = 1.38e-34; //g*cm^2*ns^-2*K^-1
 static const double FIELDSTEP = 500.0; //Oe, the change in the applied field
 static const double FIELDTIMESTEP = 0.1; //ns, time to wait before changing applied field
 static const double FIELDRANGE = 130000.0; //Oe, create loop from FIELDRANGE to -FIELDRANGE Oe
-
+#else
+static const double ALPHA = 0.02; //dimensionless
+static const double GAMMA = 1.76e-2; //(Oe*ns)^-1
+static const double KANIS = 1.0e6; //erg*cm^-3
+static const double TIMESTEP = (1e-4); //ns, the integrator timestep
+static const double MSAT = 500.0; //emu*cm^-3
+static const double JEX = 0; //erg*cm^-1
+static const double ALEN = 1e-6; //cm
+static const double TEMP = 300.0; //K
+static const double BOLTZ = 1.38e-34; //g*cm^2*ns^-2*K^-1
+static const double FIELDSTEP = 50.0; //Oe, the change in the applied field
+static const double FIELDTIMESTEP = 1.0; //ns, time to wait before changing applied field
+static const double FIELDRANGE = 4000.0; //Oe, create loop from FIELDRANGE to -FIELDRANGE Oe
+#endif
 
 //Computes the local applied field for every atom of moment M.
 void computeField(Vector * H, const SphVector * M, Vector Happl, Vector * Htherm) {

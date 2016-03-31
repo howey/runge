@@ -10,6 +10,8 @@
 
 #define gaussian(mean, sd) ((mean) + (sd) * nextGaussian())
 
+#define RIGID //Perform a rigid particle simulation
+
 #include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
